@@ -1,0 +1,210 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: Arial, sans-serif;
+    background: #f4f6f9;
+}
+
+/* Navbar */
+
+.navbar {
+    height: 60px;
+    background: #1e293b;
+    color: white;
+
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+
+    padding: 0 25px;
+
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+
+    z-index: 1000;
+}
+
+.navbar-left {
+    font-size: 20px;
+}
+
+.navbar-right {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+}
+
+.role-badge {
+    background: #2563eb;
+    padding: 5px 10px;
+    border-radius: 5px;
+}
+
+.logout-btn {
+    color: white;
+    text-decoration: none;
+
+    background: #dc2626;
+
+    padding: 7px 12px;
+    border-radius: 5px;
+}
+
+/* Sidebar */
+
+.sidebar {
+    width: 230px;
+
+    position: fixed;
+
+    top: 60px;
+    left: 0;
+    bottom: 0;
+
+    background: #0f172a;
+
+    padding-top: 20px;
+}
+
+.sidebar h2 {
+    color: white;
+
+    text-align: center;
+
+    margin-bottom: 20px;
+}
+
+.sidebar a {
+    display: block;
+
+    color: #cbd5e1;
+
+    text-decoration: none;
+
+    padding: 13px 20px;
+}
+
+.sidebar a:hover {
+    background: #1e293b;
+    color: white;
+}
+
+/* Main */
+
+main {
+    margin-left: 230px;
+
+    padding: 90px 30px 30px;
+}
+
+/* Dashboard */
+
+.dashboard-title {
+    margin-bottom: 25px;
+}
+
+.dashboard-cards {
+    display: grid;
+
+    grid-template-columns:
+        repeat(auto-fit, minmax(200px, 1fr));
+
+    gap: 20px;
+}
+
+.dashboard-card {
+    background: white;
+
+    padding: 25px;
+
+    border-radius: 10px;
+
+    box-shadow:
+        0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.dashboard-card h3 {
+    color: #64748b;
+
+    font-size: 15px;
+
+    margin-bottom: 10px;
+}
+
+.dashboard-card .number {
+    font-size: 32px;
+
+    font-weight: bold;
+
+    color: #1e293b;
+}
+
+/* Tables */
+
+.table-container {
+    background: white;
+
+    padding: 20px;
+
+    border-radius: 10px;
+
+    margin-top: 25px;
+
+    overflow-x: auto;
+}
+
+table {
+    width: 100%;
+
+    border-collapse: collapse;
+}
+
+th,
+td {
+    padding: 12px;
+
+    border-bottom: 1px solid #e5e7eb;
+
+    text-align: left;
+}
+
+th {
+    background: #f8fafc;
+}
+
+/* Buttons */
+
+.btn {
+    display: inline-block;
+
+    padding: 9px 15px;
+
+    border: none;
+
+    border-radius: 5px;
+
+    text-decoration: none;
+
+    cursor: pointer;
+}
+
+.btn-primary {
+    background: #2563eb;
+    color: white;
+}
+
+.btn-danger {
+    background: #dc2626;
+    color: white;
+}
+
+.btn-success {
+    background: #16a34a;
+    color: white;
+}

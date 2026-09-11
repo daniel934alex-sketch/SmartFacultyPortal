@@ -211,6 +211,15 @@ $result = $conn->query($sql);
                                 Edit
                             </a>
 
+                            <a
+    href="faculty-subjects.php?faculty_id=<?php
+        echo $row['faculty_id'];
+    ?>"
+    class="btn btn-success"
+>
+    Subjects
+</a>
+
 
                             <?php if ($row['status'] === 'ACTIVE'): ?>
 

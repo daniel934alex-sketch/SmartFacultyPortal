@@ -2,10 +2,78 @@
 
 require_once "../includes/auth-check.php";
 require_once "../includes/role-check.php";
+require_once "../config/database.php";
 
 requireRole('STUDENT');
 
-$username = $_SESSION['username'] ?? 'Student';
+$username = $_SESSION['username'] ?? '';
+
+if ($username === '') {
+    die("Student session not found.");
+}
+
+/*
+|--------------------------------------------------------------------------
+| Fetch logged-in student's details
+|--------------------------------------------------------------------------
+| users.username
+|      ↓
+| users.user_id
+|      ↓
+| students.user_id
+|      ↓
+| students.section_id
+|      ↓
+| sections.section_id
+|--------------------------------------------------------------------------
+*/
+
+$sql = "
+    SELECT
+        u.user_id,
+        u.username,
+        s.student_id,
+        s.register_number,
+        s.student_name,
+        s.email,
+        s.phone,
+        sec.section_name
+    FROM users u
+    INNER JOIN students s
+        ON s.user_id = u.user_id
+    INNER JOIN sections sec
+        ON sec.section_id = s.section_id
+    WHERE u.username = ?
+      AND u.role = 'STUDENT'
+    LIMIT 1
+";
+
+$stmt = $conn->prepare($sql);
+
+if (!$stmt) {
+    die("Database query preparation failed: " . htmlspecialchars($conn->error));
+}
+
+$stmt->bind_param("s", $username);
+$stmt->execute();
+
+$result = $stmt->get_result();
+
+if ($result->num_rows !== 1) {
+    die("Student record not found.");
+}
+
+$student = $result->fetch_assoc();
+
+$stmt->close();
+
+$studentName = $student['student_name'];
+$registerNumber = $student['register_number'];
+$email = $student['email'] ?? 'Not provided';
+$phone = $student['phone'] ?? 'Not provided';
+$sectionName = $student['section_name'];
+
+$firstLetter = strtoupper(substr($studentName, 0, 1));
 
 ?>
 
@@ -154,7 +222,7 @@ $username = $_SESSION['username'] ?? 'Student';
             background: white;
             border-radius: 12px;
             padding: 30px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
             max-width: 900px;
         }
 
@@ -212,6 +280,7 @@ $username = $_SESSION['username'] ?? 'Student';
         .detail-value {
             font-size: 16px;
             font-weight: 600;
+            word-break: break-word;
         }
 
         .privacy-note {
@@ -254,7 +323,6 @@ $username = $_SESSION['username'] ?? 'Student';
             .details {
                 grid-template-columns: 1fr;
             }
-
         }
 
     </style>
@@ -321,7 +389,7 @@ $username = $_SESSION['username'] ?? 'Student';
             <div class="student-info">
 
                 <div class="avatar">
-                    <?= strtoupper(substr($username, 0, 1)) ?>
+                    <?= htmlspecialchars($firstLetter) ?>
                 </div>
 
                 <span>
@@ -351,17 +419,17 @@ $username = $_SESSION['username'] ?? 'Student';
                 <div class="profile-header">
 
                     <div class="large-avatar">
-                        <?= strtoupper(substr($username, 0, 1)) ?>
+                        <?= htmlspecialchars($firstLetter) ?>
                     </div>
 
                     <div>
 
                         <h2>
-                            Aravind S
+                            <?= htmlspecialchars($studentName) ?>
                         </h2>
 
                         <p>
-                            Student · CSE-A
+                            Student · <?= htmlspecialchars($sectionName) ?>
                         </p>
 
                     </div>
@@ -378,7 +446,7 @@ $username = $_SESSION['username'] ?? 'Student';
                         </div>
 
                         <div class="detail-value">
-                            <?= htmlspecialchars($username) ?>
+                            <?= htmlspecialchars($student['username']) ?>
                         </div>
 
                     </div>
@@ -391,7 +459,7 @@ $username = $_SESSION['username'] ?? 'Student';
                         </div>
 
                         <div class="detail-value">
-                            714025104022
+                            <?= htmlspecialchars($registerNumber) ?>
                         </div>
 
                     </div>
@@ -404,7 +472,7 @@ $username = $_SESSION['username'] ?? 'Student';
                         </div>
 
                         <div class="detail-value">
-                            Aravind S
+                            <?= htmlspecialchars($studentName) ?>
                         </div>
 
                     </div>
@@ -417,7 +485,7 @@ $username = $_SESSION['username'] ?? 'Student';
                         </div>
 
                         <div class="detail-value">
-                            CSE-A
+                            <?= htmlspecialchars($sectionName) ?>
                         </div>
 
                     </div>
@@ -430,7 +498,7 @@ $username = $_SESSION['username'] ?? 'Student';
                         </div>
 
                         <div class="detail-value">
-                            aravind@example.com
+                            <?= htmlspecialchars($email) ?>
                         </div>
 
                     </div>
@@ -443,7 +511,7 @@ $username = $_SESSION['username'] ?? 'Student';
                         </div>
 
                         <div class="detail-value">
-                            9876543210
+                            <?= htmlspecialchars($phone) ?>
                         </div>
 
                     </div>
@@ -454,10 +522,10 @@ $username = $_SESSION['username'] ?? 'Student';
                 <div class="privacy-note">
 
                     🔒 <strong>Privacy:</strong>
-                    Your portal displays your own academic information.
-                    Faculty absence details, handover requests, alternate faculty
-                    information and other internal faculty information are not
-                    displayed to students.
+                    Students can view their own academic information.
+                    Faculty absence details, handover requests, alternate
+                    faculty information and other internal faculty information
+                    are not displayed here.
 
                 </div>
 

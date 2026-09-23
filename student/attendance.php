@@ -2,10 +2,175 @@
 
 require_once "../includes/auth-check.php";
 require_once "../includes/role-check.php";
+require_once "../config/database.php";
 
 requireRole('STUDENT');
 
-$username = $_SESSION['username'] ?? 'Student';
+$username = $_SESSION['username'] ?? '';
+
+if ($username === '') {
+    die("Student session not found.");
+}
+
+/*
+|--------------------------------------------------------------------------
+| Get logged-in student's ID
+|--------------------------------------------------------------------------
+*/
+
+$studentSql = "
+    SELECT
+        s.student_id,
+        s.student_name,
+        s.register_number,
+        sec.section_name
+    FROM users u
+    INNER JOIN students s
+        ON s.user_id = u.user_id
+    INNER JOIN sections sec
+        ON sec.section_id = s.section_id
+    WHERE u.username = ?
+      AND u.role = 'STUDENT'
+      AND u.status = 'ACTIVE'
+    LIMIT 1
+";
+
+$studentStmt = $conn->prepare($studentSql);
+
+if (!$studentStmt) {
+    die("Student query preparation failed.");
+}
+
+$studentStmt->bind_param("s", $username);
+$studentStmt->execute();
+
+$studentResult = $studentStmt->get_result();
+
+if ($studentResult->num_rows !== 1) {
+    $studentStmt->close();
+    die("Student record not found.");
+}
+
+$student = $studentResult->fetch_assoc();
+
+$studentStmt->close();
+
+$studentId = (int) $student['student_id'];
+$studentName = $student['student_name'];
+$sectionName = $student['section_name'];
+
+/*
+|--------------------------------------------------------------------------
+| Get subject-wise attendance
+|--------------------------------------------------------------------------
+|
+| attendance
+|     ↓
+| timetable
+|     ↓
+| subjects
+|
+|--------------------------------------------------------------------------
+*/
+
+$attendanceSql = "
+    SELECT
+        sub.subject_id,
+        sub.subject_code,
+        sub.subject_name,
+
+        COUNT(a.attendance_id) AS total_classes,
+
+        COALESCE(
+            SUM(
+                CASE
+                    WHEN a.status = 'PRESENT' THEN 1
+                    ELSE 0
+                END
+            ),
+            0
+        ) AS present_classes,
+
+        COALESCE(
+            SUM(
+                CASE
+                    WHEN a.status = 'ABSENT' THEN 1
+                    ELSE 0
+                END
+            ),
+            0
+        ) AS absent_classes
+
+    FROM attendance a
+
+    INNER JOIN timetable t
+        ON t.timetable_id = a.timetable_id
+
+    INNER JOIN subjects sub
+        ON sub.subject_id = t.subject_id
+
+    WHERE a.student_id = ?
+
+    GROUP BY
+        sub.subject_id,
+        sub.subject_code,
+        sub.subject_name
+
+    ORDER BY
+        sub.subject_name ASC
+";
+
+$attendanceStmt = $conn->prepare($attendanceSql);
+
+if (!$attendanceStmt) {
+    die("Attendance query preparation failed.");
+}
+
+$attendanceStmt->bind_param("i", $studentId);
+$attendanceStmt->execute();
+
+$attendanceResult = $attendanceStmt->get_result();
+
+$attendanceRows = [];
+
+$totalClasses = 0;
+$totalPresent = 0;
+$totalAbsent = 0;
+
+while ($row = $attendanceResult->fetch_assoc()) {
+
+    $rowTotal = (int) $row['total_classes'];
+    $rowPresent = (int) $row['present_classes'];
+    $rowAbsent = (int) $row['absent_classes'];
+
+    $rowPercentage = $rowTotal > 0
+        ? round(($rowPresent / $rowTotal) * 100, 1)
+        : 0;
+
+    $row['percentage'] = $rowPercentage;
+
+    $attendanceRows[] = $row;
+
+    $totalClasses += $rowTotal;
+    $totalPresent += $rowPresent;
+    $totalAbsent += $rowAbsent;
+}
+
+$attendanceStmt->close();
+
+/*
+|--------------------------------------------------------------------------
+| Overall attendance
+|--------------------------------------------------------------------------
+*/
+
+$overallPercentage = $totalClasses > 0
+    ? round(($totalPresent / $totalClasses) * 100, 1)
+    : 0;
+
+$firstLetter = strtoupper(
+    substr(trim($studentName), 0, 1)
+);
 
 ?>
 
@@ -15,9 +180,15 @@ $username = $_SESSION['username'] ?? 'Student';
 <head>
 
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-    <title>Attendance | Smart Faculty Portal</title>
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>
+        Attendance | Smart Faculty Portal
+    </title>
 
     <style>
 
@@ -33,23 +204,31 @@ $username = $_SESSION['username'] ?? 'Student';
             color: #222;
         }
 
-        /* SIDEBAR */
+        /* =========================================================
+           SIDEBAR
+        ========================================================= */
 
         .sidebar {
             position: fixed;
             left: 0;
             top: 0;
+
             width: 240px;
             height: 100vh;
+
             background: #151a2d;
+
             padding: 25px 15px;
         }
 
         .logo {
             color: white;
+
             font-size: 21px;
             font-weight: bold;
+
             text-align: center;
+
             margin-bottom: 35px;
         }
 
@@ -63,10 +242,16 @@ $username = $_SESSION['username'] ?? 'Student';
 
         .menu a {
             display: block;
+
             padding: 13px 15px;
+
             color: #d7d9e0;
+
             text-decoration: none;
+
             border-radius: 8px;
+
+            transition: 0.2s;
         }
 
         .menu a:hover,
@@ -77,35 +262,62 @@ $username = $_SESSION['username'] ?? 'Student';
 
         .logout {
             position: absolute;
+
             bottom: 25px;
+
             left: 15px;
             right: 15px;
         }
 
         .logout a {
             display: block;
+
             text-align: center;
+
             padding: 12px;
+
             background: #dc3545;
+
             color: white;
+
             text-decoration: none;
+
             border-radius: 8px;
+
+            transition: 0.2s;
         }
 
-        /* MAIN */
+        .logout a:hover {
+            background: #c82333;
+        }
+
+        /* =========================================================
+           MAIN
+        ========================================================= */
 
         .main {
             margin-left: 240px;
+
             min-height: 100vh;
         }
 
+        /* =========================================================
+           TOPBAR
+        ========================================================= */
+
         .topbar {
             height: 70px;
+
             background: white;
+
             display: flex;
+
             justify-content: space-between;
+
             align-items: center;
+
             padding: 0 30px;
+
             border-bottom: 1px solid #ddd;
         }
 
@@ -115,21 +327,33 @@ $username = $_SESSION['username'] ?? 'Student';
 
         .student-info {
             display: flex;
+
             align-items: center;
+
             gap: 10px;
         }
 
         .avatar {
             width: 38px;
             height: 38px;
+
             border-radius: 50%;
+
             background: #151a2d;
+
             color: white;
+
             display: flex;
+
             align-items: center;
             justify-content: center;
+
             font-weight: bold;
         }
+
+        /* =========================================================
+           CONTENT
+        ========================================================= */
 
         .content {
             padding: 30px;
@@ -141,6 +365,7 @@ $username = $_SESSION['username'] ?? 'Student';
 
         .page-heading h1 {
             font-size: 28px;
+
             margin-bottom: 8px;
         }
 
@@ -148,45 +373,65 @@ $username = $_SESSION['username'] ?? 'Student';
             color: #666;
         }
 
-        /* SUMMARY */
+        /* =========================================================
+           SUMMARY
+        ========================================================= */
 
         .summary {
             display: grid;
+
             grid-template-columns: repeat(3, 1fr);
+
             gap: 20px;
+
             margin-bottom: 25px;
         }
 
         .summary-card {
             background: white;
+
             padding: 22px;
+
             border-radius: 12px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+
+            box-shadow:
+                0 2px 8px rgba(0, 0, 0, 0.06);
         }
 
         .summary-title {
             color: #777;
+
             font-size: 14px;
+
             margin-bottom: 10px;
         }
 
         .summary-value {
             font-size: 28px;
+
             font-weight: bold;
         }
 
-        /* ATTENDANCE TABLE */
+        /* =========================================================
+           TABLE SECTION
+        ========================================================= */
 
         .section {
             background: white;
+
             padding: 25px;
+
             border-radius: 12px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+
+            box-shadow:
+                0 2px 8px rgba(0, 0, 0, 0.06);
+
             margin-bottom: 25px;
         }
 
         .section h2 {
             font-size: 20px;
+
             margin-bottom: 20px;
         }
 
@@ -196,19 +441,24 @@ $username = $_SESSION['username'] ?? 'Student';
 
         table {
             width: 100%;
+
             border-collapse: collapse;
-            min-width: 650px;
+
+            min-width: 700px;
         }
 
         th,
         td {
             padding: 14px;
+
             text-align: left;
+
             border-bottom: 1px solid #eee;
         }
 
         th {
             background: #f7f8fa;
+
             font-size: 14px;
         }
 
@@ -220,37 +470,97 @@ $username = $_SESSION['username'] ?? 'Student';
             font-weight: bold;
         }
 
+        .good {
+            color: #198754;
+        }
+
+        .warning {
+            color: #dc3545;
+        }
+
+        /* =========================================================
+           PROGRESS BAR
+        ========================================================= */
+
         .progress-bar {
             width: 140px;
+
             height: 8px;
+
             background: #e9ecef;
+
             border-radius: 10px;
+
             overflow: hidden;
         }
 
         .progress {
             height: 100%;
+
             background: #28a745;
+
             border-radius: 10px;
+
+            transition: width 0.3s ease;
         }
 
-        .good {
-            color: #198754;
-            font-weight: bold;
-        }
+        /* =========================================================
+           EMPTY STATE
+        ========================================================= */
 
-        .warning {
-            color: #dc3545;
-            font-weight: bold;
-        }
+        .empty-state {
+            text-align: center;
 
-        .note {
+            padding: 45px 20px;
+
             color: #777;
-            font-size: 13px;
-            margin-top: 15px;
         }
 
-        /* MOBILE */
+        .empty-state-icon {
+            font-size: 40px;
+
+            margin-bottom: 15px;
+        }
+
+        .empty-state h3 {
+            color: #333;
+
+            margin-bottom: 8px;
+        }
+
+        .empty-state p {
+            font-size: 14px;
+
+            line-height: 1.5;
+        }
+
+        /* =========================================================
+           STUDENT INFO
+        ========================================================= */
+
+        .student-summary {
+            display: inline-flex;
+
+            align-items: center;
+
+            gap: 10px;
+
+            padding: 8px 14px;
+
+            background: #f7f8fa;
+
+            border-radius: 20px;
+
+            margin-bottom: 20px;
+
+            font-size: 13px;
+
+            color: #555;
+        }
+
+        /* =========================================================
+           MOBILE
+        ========================================================= */
 
         @media (max-width: 850px) {
 
@@ -264,7 +574,9 @@ $username = $_SESSION['username'] ?? 'Student';
 
             .sidebar {
                 position: relative;
+
                 width: 100%;
+
                 height: auto;
             }
 
@@ -274,6 +586,7 @@ $username = $_SESSION['username'] ?? 'Student';
 
             .logout {
                 position: static;
+
                 margin-top: 20px;
             }
 
@@ -291,9 +604,13 @@ $username = $_SESSION['username'] ?? 'Student';
 
 </head>
 
+
 <body>
 
-    <!-- SIDEBAR -->
+
+    <!-- =========================================================
+         SIDEBAR
+    ========================================================== -->
 
     <aside class="sidebar">
 
@@ -301,33 +618,49 @@ $username = $_SESSION['username'] ?? 'Student';
             Smart Faculty Portal
         </div>
 
+
         <ul class="menu">
 
             <li>
+
                 <a href="dashboard.php">
                     🏠 Dashboard
                 </a>
+
             </li>
 
+
             <li>
+
                 <a href="timetable.php">
                     📅 Timetable
                 </a>
+
             </li>
 
+
             <li>
-                <a href="attendance.php" class="active">
+
+                <a
+                    href="attendance.php"
+                    class="active"
+                >
                     📊 Attendance
                 </a>
+
             </li>
 
+
             <li>
+
                 <a href="profile.php">
                     👤 Profile
                 </a>
+
             </li>
 
         </ul>
+
 
         <div class="logout">
 
@@ -340,22 +673,35 @@ $username = $_SESSION['username'] ?? 'Student';
     </aside>
 
 
-    <!-- MAIN -->
+    <!-- =========================================================
+         MAIN
+    ========================================================== -->
 
     <main class="main">
 
+
+        <!-- TOPBAR -->
+
         <header class="topbar">
 
-            <h2>Attendance</h2>
+            <h2>
+                Attendance
+            </h2>
+
 
             <div class="student-info">
 
                 <div class="avatar">
-                    <?= strtoupper(substr($username, 0, 1)) ?>
+
+                    <?= htmlspecialchars($firstLetter) ?>
+
                 </div>
 
+
                 <span>
+
                     <?= htmlspecialchars($username) ?>
+
                 </span>
 
             </div>
@@ -363,11 +709,20 @@ $username = $_SESSION['username'] ?? 'Student';
         </header>
 
 
+        <!-- =====================================================
+             CONTENT
+        ====================================================== -->
+
         <div class="content">
+
+
+            <!-- PAGE HEADING -->
 
             <div class="page-heading">
 
-                <h1>📊 My Attendance</h1>
+                <h1>
+                    📊 My Attendance
+                </h1>
 
                 <p>
                     View your subject-wise attendance summary.
@@ -376,9 +731,33 @@ $username = $_SESSION['username'] ?? 'Student';
             </div>
 
 
-            <!-- SUMMARY CARDS -->
+            <!-- STUDENT IDENTIFICATION -->
+
+            <div class="student-summary">
+
+                👤
+
+                <?= htmlspecialchars($studentName) ?>
+
+                ·
+
+                <?= htmlspecialchars($sectionName) ?>
+
+                ·
+
+                Register No:
+
+                <?= htmlspecialchars($student['register_number']) ?>
+
+            </div>
+
+
+            <!-- =================================================
+                 SUMMARY CARDS
+            ================================================== -->
 
             <div class="summary">
+
 
                 <div class="summary-card">
 
@@ -387,7 +766,17 @@ $username = $_SESSION['username'] ?? 'Student';
                     </div>
 
                     <div class="summary-value">
-                        90%
+
+                        <?php if ($totalClasses > 0): ?>
+
+                            <?= htmlspecialchars($overallPercentage) ?>%
+
+                        <?php else: ?>
+
+                            N/A
+
+                        <?php endif; ?>
+
                     </div>
 
                 </div>
@@ -400,7 +789,9 @@ $username = $_SESSION['username'] ?? 'Student';
                     </div>
 
                     <div class="summary-value">
-                        45
+
+                        <?= htmlspecialchars($totalPresent) ?>
+
                     </div>
 
                 </div>
@@ -413,15 +804,20 @@ $username = $_SESSION['username'] ?? 'Student';
                     </div>
 
                     <div class="summary-value">
-                        50
+
+                        <?= htmlspecialchars($totalClasses) ?>
+
                     </div>
 
                 </div>
 
+
             </div>
 
 
-            <!-- SUBJECT ATTENDANCE -->
+            <!-- =================================================
+                 SUBJECT-WISE ATTENDANCE
+            ================================================== -->
 
             <div class="section">
 
@@ -429,192 +825,196 @@ $username = $_SESSION['username'] ?? 'Student';
                     Subject-wise Attendance
                 </h2>
 
-                <div class="table-container">
 
-                    <table>
+                <?php if (count($attendanceRows) === 0): ?>
 
-                        <thead>
+                    <div class="empty-state">
 
-                            <tr>
+                        <div class="empty-state-icon">
+                            📋
+                        </div>
 
-                                <th>Subject</th>
-                                <th>Total Classes</th>
-                                <th>Present</th>
-                                <th>Absent</th>
-                                <th>Percentage</th>
-                                <th>Progress</th>
+                        <h3>
+                            No attendance records yet
+                        </h3>
 
-                            </tr>
+                        <p>
+                            Attendance records for your classes
+                            will appear here once faculty members
+                            start marking attendance.
+                        </p>
 
-                        </thead>
+                    </div>
 
-                        <tbody>
 
-                            <tr>
+                <?php else: ?>
 
-                                <td>DBMS</td>
 
-                                <td>20</td>
+                    <div class="table-container">
 
-                                <td>19</td>
+                        <table>
 
-                                <td>1</td>
+                            <thead>
 
-                                <td class="percentage good">
-                                    95%
-                                </td>
+                                <tr>
 
-                                <td>
+                                    <th>
+                                        Subject
+                                    </th>
 
-                                    <div class="progress-bar">
+                                    <th>
+                                        Total Classes
+                                    </th>
 
-                                        <div
-                                            class="progress"
-                                            style="width: 95%;">
-                                        </div>
+                                    <th>
+                                        Present
+                                    </th>
 
-                                    </div>
+                                    <th>
+                                        Absent
+                                    </th>
 
-                                </td>
+                                    <th>
+                                        Percentage
+                                    </th>
 
-                            </tr>
+                                    <th>
+                                        Progress
+                                    </th>
 
+                                </tr>
 
-                            <tr>
+                            </thead>
 
-                                <td>Advanced DSA</td>
 
-                                <td>18</td>
+                            <tbody>
 
-                                <td>16</td>
 
-                                <td>2</td>
+                                <?php foreach ($attendanceRows as $row): ?>
 
-                                <td class="percentage good">
-                                    89%
-                                </td>
+                                    <?php
 
-                                <td>
+                                    $percentage =
+                                        (float) $row['percentage'];
 
-                                    <div class="progress-bar">
+                                    $percentageClass =
+                                        $percentage >= 75
+                                            ? 'good'
+                                            : 'warning';
 
-                                        <div
-                                            class="progress"
-                                            style="width: 89%;">
-                                        </div>
+                                    ?>
 
-                                    </div>
 
-                                </td>
+                                    <tr>
 
-                            </tr>
+                                        <td>
 
+                                            <strong>
+                                                <?= htmlspecialchars(
+                                                    $row['subject_code']
+                                                ) ?>
+                                            </strong>
 
-                            <tr>
+                                            <br>
 
-                                <td>KVD</td>
+                                            <small>
 
-                                <td>18</td>
+                                                <?= htmlspecialchars(
+                                                    $row['subject_name']
+                                                ) ?>
 
-                                <td>16</td>
+                                            </small>
 
-                                <td>2</td>
+                                        </td>
 
-                                <td class="percentage good">
-                                    89%
-                                </td>
 
-                                <td>
+                                        <td>
 
-                                    <div class="progress-bar">
+                                            <?= htmlspecialchars(
+                                                $row['total_classes']
+                                            ) ?>
 
-                                        <div
-                                            class="progress"
-                                            style="width: 89%;">
-                                        </div>
+                                        </td>
 
-                                    </div>
 
-                                </td>
+                                        <td>
 
-                            </tr>
+                                            <?= htmlspecialchars(
+                                                $row['present_classes']
+                                            ) ?>
 
+                                        </td>
 
-                            <tr>
 
-                                <td>Operating Systems</td>
+                                        <td>
 
-                                <td>19</td>
+                                            <?= htmlspecialchars(
+                                                $row['absent_classes']
+                                            ) ?>
 
-                                <td>16</td>
+                                        </td>
 
-                                <td>3</td>
 
-                                <td class="percentage good">
-                                    84%
-                                </td>
+                                        <td
+                                            class="percentage
+                                            <?= htmlspecialchars(
+                                                $percentageClass
+                                            ) ?>"
+                                        >
 
-                                <td>
+                                            <?= htmlspecialchars(
+                                                $percentage
+                                            ) ?>%
 
-                                    <div class="progress-bar">
+                                        </td>
 
-                                        <div
-                                            class="progress"
-                                            style="width: 84%;">
-                                        </div>
 
-                                    </div>
+                                        <td>
 
-                                </td>
+                                            <div class="progress-bar">
 
-                            </tr>
+                                                <div
+                                                    class="progress"
+                                                    style="
+                                                        width:
+                                                        <?= min(
+                                                            100,
+                                                            max(
+                                                                0,
+                                                                $percentage
+                                                            )
+                                                        ) ?>%;
+                                                    "
+                                                >
+                                                </div>
 
+                                            </div>
 
-                            <tr>
+                                        </td>
 
-                                <td>Mathematics</td>
+                                    </tr>
 
-                                <td>20</td>
 
-                                <td>15</td>
+                                <?php endforeach; ?>
 
-                                <td>5</td>
 
-                                <td class="percentage warning">
-                                    75%
-                                </td>
+                            </tbody>
 
-                                <td>
+                        </table>
 
-                                    <div class="progress-bar">
+                    </div>
 
-                                        <div
-                                            class="progress"
-                                            style="width: 75%;">
-                                        </div>
 
-                                    </div>
+                <?php endif; ?>
 
-                                </td>
-
-                            </tr>
-
-                        </tbody>
-
-                    </table>
-
-                </div>
-
-                <p class="note">
-                    Attendance percentages shown above are sample values for UI testing.
-                    They will be replaced with actual database values.
-                </p>
 
             </div>
+
 
         </div>
 
     </main>
+
 
 </body>
 

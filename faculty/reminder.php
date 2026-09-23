@@ -98,6 +98,7 @@ while ($row = $result->fetch_assoc()) {
     $message = "You have " . $row['subject_name'] . " in 5 minutes.";
 
     $check_stmt = $conn->prepare($check_sql);
+
     $check_stmt->bind_param(
         "is",
         $row['user_id'],
@@ -114,8 +115,12 @@ while ($row = $result->fetch_assoc()) {
         echo "Reminder already exists for " .
              $row['subject_name'] . PHP_EOL;
 
+        $check_stmt->close();
+
         continue;
     }
+
+    $check_stmt->close();
 
 
     // Insert notification
@@ -160,6 +165,8 @@ while ($row = $result->fetch_assoc()) {
 
         echo "ERROR: Could not create reminder." . PHP_EOL;
     }
+
+    $insert_stmt->close();
 }
 
 

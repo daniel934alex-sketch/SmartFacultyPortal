@@ -6,12 +6,6 @@ require_once "../config/database.php";
 
 requireRole('STUDENT');
 
-/*
-|--------------------------------------------------------------------------
-| Logged-in user
-|--------------------------------------------------------------------------
-*/
-
 $username = $_SESSION['username'] ?? '';
 
 if ($username === '') {
@@ -20,11 +14,11 @@ if ($username === '') {
 
 /*
 |--------------------------------------------------------------------------
-| Fetch logged-in student's details
+| Get logged-in student's details
 |--------------------------------------------------------------------------
 */
 
-$sql = "
+$studentSql = "
     SELECT
         u.user_id,
         u.username,
@@ -47,25 +41,26 @@ $sql = "
     LIMIT 1
 ";
 
-$stmt = $conn->prepare($sql);
+$studentStmt = $conn->prepare($studentSql);
 
-if (!$stmt) {
-    die("Database query preparation failed.");
+if (!$studentStmt) {
+    die("Student query preparation failed.");
 }
 
-$stmt->bind_param("s", $username);
-$stmt->execute();
+$studentStmt->bind_param("s", $username);
+$studentStmt->execute();
 
-$result = $stmt->get_result();
+$studentResult = $studentStmt->get_result();
 
-if ($result->num_rows !== 1) {
-    $stmt->close();
+if ($studentResult->num_rows !== 1) {
+    $studentStmt->close();
     die("Student details not found.");
 }
 
-$student = $result->fetch_assoc();
+$student = $studentResult->fetch_assoc();
 
-$stmt->close();
+$studentStmt->close();
+
 
 /*
 |--------------------------------------------------------------------------
@@ -73,11 +68,88 @@ $stmt->close();
 |--------------------------------------------------------------------------
 */
 
+$studentId = (int) $student['student_id'];
+
 $studentName = $student['student_name'];
+
 $registerNumber = $student['register_number'];
+
 $sectionName = $student['section_name'];
 
-$firstLetter = strtoupper(substr(trim($studentName), 0, 1));
+$firstLetter = strtoupper(
+    substr(trim($studentName), 0, 1)
+);
+
+
+/*
+|--------------------------------------------------------------------------
+| Get student's attendance summary
+|--------------------------------------------------------------------------
+*/
+
+$attendanceSql = "
+    SELECT
+        COUNT(*) AS total_classes,
+        COALESCE(
+            SUM(
+                CASE
+                    WHEN status = 'PRESENT' THEN 1
+                    ELSE 0
+                END
+            ),
+            0
+        ) AS present_classes
+    FROM attendance
+    WHERE student_id = ?
+";
+
+$attendanceStmt = $conn->prepare($attendanceSql);
+
+if (!$attendanceStmt) {
+    die("Attendance query preparation failed.");
+}
+
+$attendanceStmt->bind_param("i", $studentId);
+
+$attendanceStmt->execute();
+
+$attendanceResult = $attendanceStmt->get_result();
+
+$attendanceData = $attendanceResult->fetch_assoc();
+
+$attendanceStmt->close();
+
+
+$totalAttendanceClasses =
+    (int) ($attendanceData['total_classes'] ?? 0);
+
+$presentAttendanceClasses =
+    (int) ($attendanceData['present_classes'] ?? 0);
+
+
+/*
+|--------------------------------------------------------------------------
+| Calculate attendance percentage
+|--------------------------------------------------------------------------
+*/
+
+if ($totalAttendanceClasses > 0) {
+
+    $attendancePercentage = round(
+        ($presentAttendanceClasses / $totalAttendanceClasses) * 100,
+        1
+    );
+
+    $attendanceDisplay =
+        $attendancePercentage . '%';
+
+} else {
+
+    $attendancePercentage = null;
+
+    $attendanceDisplay = 'N/A';
+
+}
 
 ?>
 
@@ -96,6 +168,7 @@ $firstLetter = strtoupper(substr(trim($studentName), 0, 1));
     <title>
         Student Dashboard | Smart Faculty Portal
     </title>
+
 
     <style>
 
@@ -117,6 +190,7 @@ $firstLetter = strtoupper(substr(trim($studentName), 0, 1));
 
         .sidebar {
             position: fixed;
+
             left: 0;
             top: 0;
 
@@ -128,10 +202,12 @@ $firstLetter = strtoupper(substr(trim($studentName), 0, 1));
             padding: 25px 15px;
         }
 
+
         .logo {
             color: white;
 
             font-size: 21px;
+
             font-weight: bold;
 
             text-align: center;
@@ -139,13 +215,16 @@ $firstLetter = strtoupper(substr(trim($studentName), 0, 1));
             margin-bottom: 35px;
         }
 
+
         .menu {
             list-style: none;
         }
 
+
         .menu li {
             margin-bottom: 8px;
         }
+
 
         .menu a {
             display: block;
@@ -161,11 +240,14 @@ $firstLetter = strtoupper(substr(trim($studentName), 0, 1));
             transition: 0.2s;
         }
 
+
         .menu a:hover,
         .menu a.active {
             background: #252d4d;
+
             color: white;
         }
+
 
         .logout {
             position: absolute;
@@ -175,6 +257,7 @@ $firstLetter = strtoupper(substr(trim($studentName), 0, 1));
             left: 15px;
             right: 15px;
         }
+
 
         .logout a {
             display: block;
@@ -194,9 +277,11 @@ $firstLetter = strtoupper(substr(trim($studentName), 0, 1));
             transition: 0.2s;
         }
 
+
         .logout a:hover {
             background: #c82333;
         }
+
 
         /* =========================================================
            MAIN
@@ -207,6 +292,7 @@ $firstLetter = strtoupper(substr(trim($studentName), 0, 1));
 
             min-height: 100vh;
         }
+
 
         /* =========================================================
            TOP BAR
@@ -228,9 +314,11 @@ $firstLetter = strtoupper(substr(trim($studentName), 0, 1));
             border-bottom: 1px solid #ddd;
         }
 
+
         .topbar h2 {
             font-size: 22px;
         }
+
 
         .student-info {
             display: flex;
@@ -241,6 +329,7 @@ $firstLetter = strtoupper(substr(trim($studentName), 0, 1));
 
             font-size: 14px;
         }
+
 
         .avatar {
             width: 38px;
@@ -255,10 +344,12 @@ $firstLetter = strtoupper(substr(trim($studentName), 0, 1));
             display: flex;
 
             align-items: center;
+
             justify-content: center;
 
             font-weight: bold;
         }
+
 
         /* =========================================================
            CONTENT
@@ -268,9 +359,11 @@ $firstLetter = strtoupper(substr(trim($studentName), 0, 1));
             padding: 30px;
         }
 
+
         .welcome {
             margin-bottom: 25px;
         }
+
 
         .welcome h1 {
             font-size: 28px;
@@ -278,11 +371,13 @@ $firstLetter = strtoupper(substr(trim($studentName), 0, 1));
             margin-bottom: 8px;
         }
 
+
         .welcome p {
             color: #666;
 
             font-size: 15px;
         }
+
 
         /* =========================================================
            CARDS
@@ -298,6 +393,7 @@ $firstLetter = strtoupper(substr(trim($studentName), 0, 1));
             margin-bottom: 30px;
         }
 
+
         .card {
             background: white;
 
@@ -309,6 +405,7 @@ $firstLetter = strtoupper(substr(trim($studentName), 0, 1));
                 0 2px 8px rgba(0, 0, 0, 0.06);
         }
 
+
         .card-title {
             color: #777;
 
@@ -317,11 +414,13 @@ $firstLetter = strtoupper(substr(trim($studentName), 0, 1));
             margin-bottom: 10px;
         }
 
+
         .card-value {
             font-size: 28px;
 
             font-weight: bold;
         }
+
 
         /* =========================================================
            SECTION
@@ -340,11 +439,13 @@ $firstLetter = strtoupper(substr(trim($studentName), 0, 1));
             margin-bottom: 25px;
         }
 
+
         .section h2 {
             font-size: 20px;
 
             margin-bottom: 20px;
         }
+
 
         /* =========================================================
            TABLE
@@ -354,6 +455,7 @@ $firstLetter = strtoupper(substr(trim($studentName), 0, 1));
             overflow-x: auto;
         }
 
+
         table {
             width: 100%;
 
@@ -361,6 +463,7 @@ $firstLetter = strtoupper(substr(trim($studentName), 0, 1));
 
             min-width: 700px;
         }
+
 
         th,
         td {
@@ -371,19 +474,23 @@ $firstLetter = strtoupper(substr(trim($studentName), 0, 1));
             border-bottom: 1px solid #eee;
         }
 
+
         th {
             background: #f7f8fa;
 
             font-size: 14px;
         }
 
+
         td {
             font-size: 14px;
         }
 
+
         .period {
             font-weight: bold;
         }
+
 
         .status {
             display: inline-block;
@@ -399,6 +506,7 @@ $firstLetter = strtoupper(substr(trim($studentName), 0, 1));
             color: #2e7d32;
         }
 
+
         /* =========================================================
            QUICK LINKS
         ========================================================= */
@@ -410,6 +518,7 @@ $firstLetter = strtoupper(substr(trim($studentName), 0, 1));
 
             gap: 15px;
         }
+
 
         .quick-link {
             padding: 18px;
@@ -425,11 +534,13 @@ $firstLetter = strtoupper(substr(trim($studentName), 0, 1));
             transition: 0.2s;
         }
 
+
         .quick-link:hover {
             background: #f7f8fa;
 
             transform: translateY(-2px);
         }
+
 
         .quick-link strong {
             display: block;
@@ -437,14 +548,16 @@ $firstLetter = strtoupper(substr(trim($studentName), 0, 1));
             margin-bottom: 6px;
         }
 
+
         .quick-link span {
             color: #777;
 
             font-size: 13px;
         }
 
+
         /* =========================================================
-           RESPONSIVE
+           MOBILE
         ========================================================= */
 
         @media (max-width: 1100px) {
@@ -455,21 +568,25 @@ $firstLetter = strtoupper(substr(trim($studentName), 0, 1));
 
         }
 
+
         @media (max-width: 900px) {
 
             .sidebar {
                 width: 200px;
             }
 
+
             .main {
                 margin-left: 200px;
             }
+
 
             .quick-links {
                 grid-template-columns: 1fr;
             }
 
         }
+
 
         @media (max-width: 650px) {
 
@@ -481,9 +598,11 @@ $firstLetter = strtoupper(substr(trim($studentName), 0, 1));
                 height: auto;
             }
 
+
             .main {
                 margin-left: 0;
             }
+
 
             .logout {
                 position: static;
@@ -491,13 +610,16 @@ $firstLetter = strtoupper(substr(trim($studentName), 0, 1));
                 margin-top: 20px;
             }
 
+
             .topbar {
                 padding: 0 15px;
             }
 
+
             .content {
                 padding: 15px;
             }
+
 
             .cards {
                 grid-template-columns: 1fr;
@@ -515,9 +637,10 @@ $firstLetter = strtoupper(substr(trim($studentName), 0, 1));
 
     <!-- =========================================================
          SIDEBAR
-    ========================================================== -->
+    ========================================================= -->
 
     <aside class="sidebar">
+
 
         <div class="logo">
             Smart Faculty Portal
@@ -525,6 +648,7 @@ $firstLetter = strtoupper(substr(trim($studentName), 0, 1));
 
 
         <ul class="menu">
+
 
             <li>
 
@@ -558,11 +682,21 @@ $firstLetter = strtoupper(substr(trim($studentName), 0, 1));
 
             <li>
 
+                <a href="announcements.php">
+                    📢 Announcements
+                </a>
+
+            </li>
+
+
+            <li>
+
                 <a href="profile.php">
                     👤 Profile
                 </a>
 
             </li>
+
 
         </ul>
 
@@ -575,12 +709,13 @@ $firstLetter = strtoupper(substr(trim($studentName), 0, 1));
 
         </div>
 
+
     </aside>
 
 
     <!-- =========================================================
          MAIN
-    ========================================================== -->
+    ========================================================= -->
 
     <main class="main">
 
@@ -589,12 +724,14 @@ $firstLetter = strtoupper(substr(trim($studentName), 0, 1));
 
         <header class="topbar">
 
+
             <h2>
                 Student Dashboard
             </h2>
 
 
             <div class="student-info">
+
 
                 <div class="avatar">
 
@@ -609,7 +746,9 @@ $firstLetter = strtoupper(substr(trim($studentName), 0, 1));
 
                 </span>
 
+
             </div>
+
 
         </header>
 
@@ -625,10 +764,13 @@ $firstLetter = strtoupper(substr(trim($studentName), 0, 1));
 
             <div class="welcome">
 
+
                 <h1>
 
                     Welcome,
+
                     <?= htmlspecialchars($studentName) ?>
+
                     👋
 
                 </h1>
@@ -646,6 +788,7 @@ $firstLetter = strtoupper(substr(trim($studentName), 0, 1));
 
                 </p>
 
+
             </div>
 
 
@@ -660,15 +803,18 @@ $firstLetter = strtoupper(substr(trim($studentName), 0, 1));
 
                 <div class="card">
 
+
                     <div class="card-title">
                         My Section
                     </div>
+
 
                     <div class="card-value">
 
                         <?= htmlspecialchars($sectionName) ?>
 
                     </div>
+
 
                 </div>
 
@@ -677,13 +823,16 @@ $firstLetter = strtoupper(substr(trim($studentName), 0, 1));
 
                 <div class="card">
 
+
                     <div class="card-title">
                         Today's Classes
                     </div>
 
+
                     <div class="card-value">
                         6
                     </div>
+
 
                 </div>
 
@@ -692,13 +841,18 @@ $firstLetter = strtoupper(substr(trim($studentName), 0, 1));
 
                 <div class="card">
 
+
                     <div class="card-title">
                         Attendance
                     </div>
 
+
                     <div class="card-value">
-                        90%
+
+                        <?= htmlspecialchars($attendanceDisplay) ?>
+
                     </div>
+
 
                 </div>
 
@@ -707,15 +861,19 @@ $firstLetter = strtoupper(substr(trim($studentName), 0, 1));
 
                 <div class="card">
 
+
                     <div class="card-title">
                         Next Class
                     </div>
+
 
                     <div class="card-value">
                         P4
                     </div>
 
+
                 </div>
+
 
             </div>
 
@@ -726,6 +884,7 @@ $firstLetter = strtoupper(substr(trim($studentName), 0, 1));
 
             <div class="section">
 
+
                 <h2>
                     📅 Today's Classes
                 </h2>
@@ -733,7 +892,9 @@ $firstLetter = strtoupper(substr(trim($studentName), 0, 1));
 
                 <div class="table-container">
 
+
                     <table>
+
 
                         <thead>
 
@@ -773,25 +934,31 @@ $firstLetter = strtoupper(substr(trim($studentName), 0, 1));
 
                             <tr>
 
+
                                 <td class="period">
                                     P1
                                 </td>
+
 
                                 <td>
                                     09:00 - 09:50
                                 </td>
 
+
                                 <td>
                                     Operating Systems
                                 </td>
+
 
                                 <td>
                                     Faculty 01
                                 </td>
 
+
                                 <td>
                                     CS-101
                                 </td>
+
 
                                 <td>
 
@@ -801,30 +968,37 @@ $firstLetter = strtoupper(substr(trim($studentName), 0, 1));
 
                                 </td>
 
+
                             </tr>
 
 
                             <tr>
+
 
                                 <td class="period">
                                     P2
                                 </td>
 
+
                                 <td>
                                     09:50 - 10:40
                                 </td>
+
 
                                 <td>
                                     Database Management
                                 </td>
 
+
                                 <td>
                                     Faculty 02
                                 </td>
 
+
                                 <td>
                                     CS-101
                                 </td>
+
 
                                 <td>
 
@@ -834,30 +1008,37 @@ $firstLetter = strtoupper(substr(trim($studentName), 0, 1));
 
                                 </td>
 
+
                             </tr>
 
 
                             <tr>
+
 
                                 <td class="period">
                                     P3
                                 </td>
 
+
                                 <td>
                                     11:00 - 11:50
                                 </td>
+
 
                                 <td>
                                     Computer Networks
                                 </td>
 
+
                                 <td>
                                     Faculty 03
                                 </td>
 
+
                                 <td>
                                     CS-102
                                 </td>
+
 
                                 <td>
 
@@ -866,31 +1047,38 @@ $firstLetter = strtoupper(substr(trim($studentName), 0, 1));
                                     </span>
 
                                 </td>
+
 
                             </tr>
 
 
                             <tr>
 
+
                                 <td class="period">
                                     P4
                                 </td>
+
 
                                 <td>
                                     11:50 - 12:40
                                 </td>
 
+
                                 <td>
                                     Advanced DSA
                                 </td>
+
 
                                 <td>
                                     Faculty 04
                                 </td>
 
+
                                 <td>
                                     CS-102
                                 </td>
+
 
                                 <td>
 
@@ -899,15 +1087,19 @@ $firstLetter = strtoupper(substr(trim($studentName), 0, 1));
                                     </span>
 
                                 </td>
+
 
                             </tr>
 
 
                         </tbody>
 
+
                     </table>
 
+
                 </div>
+
 
             </div>
 
@@ -917,6 +1109,7 @@ $firstLetter = strtoupper(substr(trim($studentName), 0, 1));
             ================================================== -->
 
             <div class="section">
+
 
                 <h2>
                     Quick Access
@@ -959,16 +1152,16 @@ $firstLetter = strtoupper(substr(trim($studentName), 0, 1));
 
 
                     <a
-                        href="profile.php"
+                        href="announcements.php"
                         class="quick-link"
                     >
 
                         <strong>
-                            👤 My Profile
+                            📢 Announcements
                         </strong>
 
                         <span>
-                            View your student information.
+                            View the latest portal announcements.
                         </span>
 
                     </a>
@@ -976,10 +1169,12 @@ $firstLetter = strtoupper(substr(trim($studentName), 0, 1));
 
                 </div>
 
+
             </div>
 
 
         </div>
+
 
     </main>
 

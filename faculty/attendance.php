@@ -1,8 +1,33 @@
 <?php
 
+session_start();
+
 require_once("../config/db.php");
 
-$faculty_id = 1; // Testing faculty
+
+/* --------------------------------
+   Faculty Login Check
+-------------------------------- */
+
+if (
+    !isset($_SESSION['user_id'])
+    ||
+    $_SESSION['role'] !== 'FACULTY'
+    ||
+    !isset($_SESSION['faculty_id'])
+) {
+
+    header("Location: ../auth/login.php");
+    exit;
+}
+
+
+/* --------------------------------
+   Logged-in Faculty ID
+-------------------------------- */
+
+$faculty_id = (int)$_SESSION['faculty_id'];
+
 
 $selected_date = $_GET['date'] ?? date('Y-m-d');
 
@@ -12,6 +37,7 @@ $period_id = isset($_GET['period_id'])
 
 $message = "";
 $message_color = "green";
+
 
 /* --------------------------------
    Attendance Update
@@ -27,25 +53,37 @@ if (
 
     $action = $_GET['action'];
 
-    $student_id = (int)$_GET['student_id'];
+    $student_id =
+        (int)$_GET['student_id'];
 
-    $timetable_id = (int)$_GET['timetable_id'];
+    $timetable_id =
+        (int)$_GET['timetable_id'];
 
-    if ($action === "present" || $action === "absent") {
 
-        $status = strtoupper($action);
+    if (
+        $action === "present"
+        ||
+        $action === "absent"
+    ) {
+
+        $status =
+            strtoupper($action);
+
 
         /* --------------------------------
-           Check whether attendance already exists
+           Check Existing Attendance
         -------------------------------- */
 
         $check = $conn->prepare("
-            SELECT attendance_id, status
+            SELECT
+                attendance_id,
+                status
             FROM attendance
             WHERE timetable_id = ?
               AND student_id = ?
               AND attendance_date = ?
         ");
+
 
         $check->bind_param(
             "iis",
@@ -54,31 +92,45 @@ if (
             $selected_date
         );
 
+
         $check->execute();
 
-        $result = $check->get_result();
+
+        $result =
+            $check->get_result();
+
 
         /* --------------------------------
            Duplicate Attendance Check
         -------------------------------- */
 
-        if ($result->num_rows > 0) {
+        if (
+            $result->num_rows > 0
+        ) {
 
-            $row = $result->fetch_assoc();
+            $row =
+                $result->fetch_assoc();
 
-            $existing_status = $row['status'];
+
+            $existing_status =
+                $row['status'];
+
 
             $message =
                 "Attendance already marked as "
                 . $existing_status
                 . ".";
 
-            $message_color = "red";
+
+            $message_color =
+                "red";
+
 
         } else {
 
+
             /* --------------------------------
-               Insert New Attendance
+               Insert Attendance
             -------------------------------- */
 
             $insert = $conn->prepare("
@@ -94,6 +146,7 @@ if (
                 VALUES (?, ?, ?, ?, ?, NOW())
             ");
 
+
             $insert->bind_param(
                 "iiiss",
                 $timetable_id,
@@ -103,21 +156,29 @@ if (
                 $status
             );
 
-            if ($insert->execute()) {
+
+            if (
+                $insert->execute()
+            ) {
 
                 $message =
                     "Attendance marked as "
                     . $status
                     . " successfully!";
 
-                $message_color = "green";
+
+                $message_color =
+                    "green";
+
 
             } else {
 
                 $message =
                     "Error while saving attendance.";
 
-                $message_color = "red";
+
+                $message_color =
+                    "red";
             }
         }
     }
@@ -143,25 +204,40 @@ $periods = $conn->query("
    Date Validation
 -------------------------------- */
 
-$today = date('Y-m-d');
+$today =
+    date('Y-m-d');
 
-if ($selected_date > $today) {
 
-    $message = "Future date attendance cannot be marked.";
+if (
+    $selected_date > $today
+) {
 
-    $message_color = "red";
+    $message =
+        "Future date attendance cannot be marked.";
 
-    $timetable = false;
+
+    $message_color =
+        "red";
+
+
+    $timetable =
+        false;
+
 
 } else {
+
 
     /* --------------------------------
        Get Day Name
     -------------------------------- */
 
-    $day_name = strtoupper(
-        date('l', strtotime($selected_date))
-    );
+    $day_name =
+        strtoupper(
+            date(
+                'l',
+                strtotime($selected_date)
+            )
+        );
 
 
     /* --------------------------------
@@ -183,6 +259,7 @@ if ($selected_date > $today) {
         LIMIT 1
     ");
 
+
     $stmt->bind_param(
         "sii",
         $day_name,
@@ -190,9 +267,12 @@ if ($selected_date > $today) {
         $faculty_id
     );
 
+
     $stmt->execute();
 
-    $timetable = $stmt
+
+    $timetable =
+        $stmt
         ->get_result()
         ->fetch_assoc();
 }
@@ -204,11 +284,18 @@ if ($selected_date > $today) {
 
 $students = [];
 
-if ($timetable) {
 
-    $section_id = $timetable['section_id'];
+if (
+    $timetable
+) {
 
-    $timetable_id = $timetable['timetable_id'];
+    $section_id =
+        $timetable['section_id'];
+
+
+    $timetable_id =
+        $timetable['timetable_id'];
+
 
     $student_stmt = $conn->prepare("
         SELECT
@@ -221,22 +308,27 @@ if ($timetable) {
         ORDER BY student_id
     ");
 
+
     $student_stmt->bind_param(
         "i",
         $section_id
     );
 
+
     $student_stmt->execute();
+
 
     $student_result =
         $student_stmt->get_result();
+
 
     while (
         $row =
         $student_result->fetch_assoc()
     ) {
 
-        $students[] = $row;
+        $students[] =
+            $row;
     }
 }
 
@@ -248,23 +340,63 @@ if ($timetable) {
 
 <head>
 
-    <title>Faculty Attendance</title>
+    <title>
+        Faculty Attendance
+    </title>
 
 </head>
 
 <body>
 
-<h1>Faculty Attendance Page</h1>
+
+<h1>
+    Faculty Attendance Page
+</h1>
+
+
+<p>
+
+    <strong>
+        Logged-in Faculty:
+    </strong>
+
+    <?php
+    echo htmlspecialchars(
+        $_SESSION['username']
+    );
+    ?>
+
+</p>
+
+
+<p>
+
+    <strong>
+        Faculty ID:
+    </strong>
+
+    <?php
+    echo $faculty_id;
+    ?>
+
+</p>
 
 
 <?php if ($message != ""): ?>
 
-    <p style="color: <?php echo $message_color; ?>;">
+    <p
+        style="color:
+        <?php
+        echo $message_color;
+        ?>;"
+    >
 
         <strong>
 
             <?php
-            echo htmlspecialchars($message);
+            echo htmlspecialchars(
+                $message
+            );
             ?>
 
         </strong>
@@ -280,38 +412,56 @@ if ($timetable) {
 
 <form method="GET">
 
+
     <label>
-        <strong>Select Date:</strong>
+
+        <strong>
+            Select Date:
+        </strong>
+
     </label>
+
 
     <input
         type="date"
         name="date"
         value="<?php
-        echo htmlspecialchars($selected_date);
+        echo htmlspecialchars(
+            $selected_date
+        );
         ?>"
         required
     >
+
 
     <br>
     <br>
 
 
     <label>
-        <strong>Select Period:</strong>
+
+        <strong>
+            Select Period:
+        </strong>
+
     </label>
+
 
     <select
         name="period_id"
         required
     >
 
+
         <?php
+
         while (
             $period =
             $periods->fetch_assoc()
         ):
+
         ?>
+
 
             <option
                 value="<?php
@@ -329,6 +479,7 @@ if ($timetable) {
 
                 ?>
             >
+
 
                 Period
                 <?php
@@ -357,9 +508,14 @@ if ($timetable) {
                 );
                 ?>
 
+
             </option>
 
-        <?php endwhile; ?>
+
+        <?php
+        endwhile;
+        ?>
+
 
     </select>
 
@@ -368,11 +524,14 @@ if ($timetable) {
     <br>
 
 
-    <button type="submit">
+    <button
+        type="submit"
+    >
 
         Load Students
 
     </button>
+
 
 </form>
 
@@ -380,21 +539,28 @@ if ($timetable) {
 <hr>
 
 
-<h2>Student Attendance</h2>
+<h2>
+    Student Attendance
+</h2>
 
 
 <p>
 
-    <strong>Date:</strong>
+    <strong>
+        Date:
+    </strong>
 
     <?php
-    echo htmlspecialchars($selected_date);
+    echo htmlspecialchars(
+        $selected_date
+    );
     ?>
 
 </p>
 
 
 <?php if (!$timetable): ?>
+
 
     <p style="color:red;">
 
@@ -408,13 +574,17 @@ if ($timetable) {
     </p>
 
 
-<?php elseif (count($students) == 0): ?>
+<?php elseif (
+    count($students) == 0
+): ?>
+
 
     <p style="color:red;">
 
         <strong>
 
-            No students found for this section.
+            No students found
+            for this section.
 
         </strong>
 
@@ -424,183 +594,231 @@ if ($timetable) {
 <?php else: ?>
 
 
-<table border="1" cellpadding="10">
-
-    <tr>
-
-        <th>Student ID</th>
-
-        <th>Register Number</th>
-
-        <th>Student Name</th>
-
-        <th>Section ID</th>
-
-        <th>Current Status</th>
-
-        <th>Attendance</th>
-
-    </tr>
-
-
-    <?php
-    foreach ($students as $student):
-    ?>
-
-        <?php
-
-        /* --------------------------------
-           Get Current Attendance Status
-        -------------------------------- */
-
-        $status_stmt = $conn->prepare("
-            SELECT status
-            FROM attendance
-            WHERE timetable_id = ?
-              AND student_id = ?
-              AND attendance_date = ?
-        ");
-
-        $status_stmt->bind_param(
-            "iis",
-            $timetable_id,
-            $student['student_id'],
-            $selected_date
-        );
-
-        $status_stmt->execute();
-
-        $status_result =
-            $status_stmt->get_result();
-
-        $current_status = "NOT MARKED";
-
-        if (
-            $status_result->num_rows > 0
-        ) {
-
-            $status_row =
-                $status_result->fetch_assoc();
-
-            $current_status =
-                $status_row['status'];
-        }
-
-        ?>
+    <table
+        border="1"
+        cellpadding="10"
+    >
 
 
         <tr>
 
-            <td>
+            <th>
+                Student ID
+            </th>
 
-                <?php
-                echo $student['student_id'];
-                ?>
+            <th>
+                Register Number
+            </th>
 
-            </td>
+            <th>
+                Student Name
+            </th>
 
+            <th>
+                Section ID
+            </th>
 
-            <td>
+            <th>
+                Current Status
+            </th>
 
-                <?php
-                echo htmlspecialchars(
-                    $student['register_number']
-                );
-                ?>
-
-            </td>
-
-
-            <td>
-
-                <?php
-                echo htmlspecialchars(
-                    $student['student_name']
-                );
-                ?>
-
-            </td>
-
-
-            <td>
-
-                <?php
-                echo $student['section_id'];
-                ?>
-
-            </td>
-
-
-            <td>
-
-                <strong>
-
-                    <?php
-                    echo $current_status;
-                    ?>
-
-                </strong>
-
-            </td>
-
-
-            <td>
-
-
-                <!-- Present Button -->
-
-                <a
-                    href="?date=<?php
-                    echo urlencode($selected_date);
-                    ?>&period_id=<?php
-                    echo $period_id;
-                    ?>&action=present&student_id=<?php
-                    echo $student['student_id'];
-                    ?>&timetable_id=<?php
-                    echo $timetable_id;
-                    ?>"
-                >
-
-                    <button type="button">
-
-                        Present
-
-                    </button>
-
-                </a>
-
-
-                <!-- Absent Button -->
-
-                <a
-                    href="?date=<?php
-                    echo urlencode($selected_date);
-                    ?>&period_id=<?php
-                    echo $period_id;
-                    ?>&action=absent&student_id=<?php
-                    echo $student['student_id'];
-                    ?>&timetable_id=<?php
-                    echo $timetable_id;
-                    ?>"
-                >
-
-                    <button type="button">
-
-                        Absent
-
-                    </button>
-
-                </a>
-
-
-            </td>
+            <th>
+                Attendance
+            </th>
 
         </tr>
 
 
-    <?php endforeach; ?>
+        <?php
 
-</table>
+        foreach (
+            $students
+            as $student
+        ):
+
+        ?>
+
+
+            <?php
+
+
+            /* --------------------------------
+               Get Current Attendance Status
+            -------------------------------- */
+
+            $status_stmt =
+                $conn->prepare("
+                    SELECT
+                        status
+                    FROM attendance
+                    WHERE timetable_id = ?
+                      AND student_id = ?
+                      AND attendance_date = ?
+                ");
+
+
+            $status_stmt->bind_param(
+                "iis",
+                $timetable_id,
+                $student['student_id'],
+                $selected_date
+            );
+
+
+            $status_stmt->execute();
+
+
+            $status_result =
+                $status_stmt
+                ->get_result();
+
+
+            $current_status =
+                "NOT MARKED";
+
+
+            if (
+                $status_result->num_rows > 0
+            ) {
+
+                $status_row =
+                    $status_result
+                    ->fetch_assoc();
+
+
+                $current_status =
+                    $status_row['status'];
+            }
+
+
+            ?>
+
+
+            <tr>
+
+
+                <td>
+
+                    <?php
+                    echo $student['student_id'];
+                    ?>
+
+                </td>
+
+
+                <td>
+
+                    <?php
+                    echo htmlspecialchars(
+                        $student['register_number']
+                    );
+                    ?>
+
+                </td>
+
+
+                <td>
+
+                    <?php
+                    echo htmlspecialchars(
+                        $student['student_name']
+                    );
+                    ?>
+
+                </td>
+
+
+                <td>
+
+                    <?php
+                    echo $student['section_id'];
+                    ?>
+
+                </td>
+
+
+                <td>
+
+                    <strong>
+
+                        <?php
+                        echo $current_status;
+                        ?>
+
+                    </strong>
+
+                </td>
+
+
+                <td>
+
+
+                    <!-- Present Button -->
+
+                    <a
+                        href="?date=<?php
+                        echo urlencode(
+                            $selected_date
+                        );
+                        ?>&period_id=<?php
+                        echo $period_id;
+                        ?>&action=present&student_id=<?php
+                        echo $student['student_id'];
+                        ?>&timetable_id=<?php
+                        echo $timetable_id;
+                        ?>"
+                    >
+
+                        <button
+                            type="button"
+                        >
+
+                            Present
+
+                        </button>
+
+                    </a>
+
+
+                    <!-- Absent Button -->
+
+                    <a
+                        href="?date=<?php
+                        echo urlencode(
+                            $selected_date
+                        );
+                        ?>&period_id=<?php
+                        echo $period_id;
+                        ?>&action=absent&student_id=<?php
+                        echo $student['student_id'];
+                        ?>&timetable_id=<?php
+                        echo $timetable_id;
+                        ?>"
+                    >
+
+                        <button
+                            type="button"
+                        >
+
+                            Absent
+
+                        </button>
+
+                    </a>
+
+
+                </td>
+
+
+            </tr>
+
+
+        <?php
+        endforeach;
+        ?>
+
+
+    </table>
 
 
 <?php endif; ?>

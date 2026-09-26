@@ -6,47 +6,64 @@ require_once "../config/database.php";
 require_once "../config/config.php";
 
 
-// If already logged in, redirect to dashboard
+/* -------------------------------------------------
+   If already logged in, redirect to dashboard
+------------------------------------------------- */
+
 if (isset($_SESSION['user_id'])) {
 
     if ($_SESSION['role'] === 'HOD') {
+
         header("Location: ../admin/dashboard.php");
         exit;
-    }
 
-    if ($_SESSION['role'] === 'FACULTY') {
+    } elseif ($_SESSION['role'] === 'FACULTY') {
+
         header("Location: ../faculty/dashboard.php");
         exit;
-    }
 
-    if ($_SESSION['role'] === 'STUDENT') {
+    } elseif ($_SESSION['role'] === 'STUDENT') {
+
         header("Location: ../student/dashboard.php");
         exit;
     }
 }
 
 
+/* -------------------------------------------------
+   Variables
+------------------------------------------------- */
+
 $error = "";
 
-
-// ========================================
-// LOGIN FORM SUBMISSION
-// ========================================
-
-if ($_SERVER["REQUEST_METHOD"] === "POST") {
-
-    $username = trim($_POST['username'] ?? '');
-    $password = $_POST['password'] ?? '';
+$username = "";
 
 
-    // Basic validation
+/* -------------------------------------------------
+   Login Form Submitted
+------------------------------------------------- */
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+
+    $username = trim($_POST['username'] ?? "");
+    $password = $_POST['password'] ?? "";
+
+
+    /* -------------------------------------------------
+       Basic Validation
+    ------------------------------------------------- */
+
     if ($username === "" || $password === "") {
 
         $error = "Please enter username and password.";
 
     } else {
 
-        // Find user
+
+        /* -------------------------------------------------
+           Find User
+        ------------------------------------------------- */
+
         $stmt = $conn->prepare("
             SELECT
                 user_id,
@@ -59,70 +76,214 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             LIMIT 1
         ");
 
-        $stmt->bind_param("s", $username);
+        if (!$stmt) {
 
-        $stmt->execute();
-
-        $result = $stmt->get_result();
-
-
-        if ($result->num_rows === 1) {
-
-            $user = $result->fetch_assoc();
-
-
-            // Check account status
-            if ($user['status'] !== 'ACTIVE') {
-
-                $error = "Your account is inactive.";
-
-            }
-
-            // Verify password
-            elseif (password_verify($password, $user['password'])) {
-
-                // Regenerate session ID
-                session_regenerate_id(true);
-
-
-                // Store login information
-                $_SESSION['user_id'] = $user['user_id'];
-                $_SESSION['username'] = $user['username'];
-                $_SESSION['role'] = $user['role'];
-
-
-                // Redirect based on role
-                if ($user['role'] === 'HOD') {
-
-                    header("Location: ../admin/dashboard.php");
-                    exit;
-
-                } elseif ($user['role'] === 'FACULTY') {
-
-                    header("Location: ../faculty/dashboard.php");
-                    exit;
-
-                } elseif ($user['role'] === 'STUDENT') {
-
-                    header("Location: ../student/dashboard.php");
-                    exit;
-                }
-
-            } else {
-
-                $error = "Invalid username or password.";
-            }
+            $error = "Database query error.";
 
         } else {
 
-            $error = "Invalid username or password.";
-        }
+            $stmt->bind_param(
+                "s",
+                $username
+            );
 
-        $stmt->close();
+            $stmt->execute();
+
+            $result = $stmt->get_result();
+
+
+            /* -------------------------------------------------
+               Check User
+            ------------------------------------------------- */
+
+            if ($result->num_rows === 1) {
+
+                $user = $result->fetch_assoc();
+
+
+                /* -------------------------------------------------
+                   Check Account Status
+                ------------------------------------------------- */
+
+                $user_status = strtoupper(
+                    trim($user['status'] ?? '')
+                );
+
+
+                if (
+                    $user_status !== 'ACTIVE'
+                    &&
+                    $user_status !== '1'
+                ) {
+
+                    $error =
+                        "Your account is inactive.";
+
+                } elseif (
+                    password_verify(
+                        $password,
+                        $user['password']
+                    )
+                ) {
+
+
+                    /* -------------------------------------------------
+                       Regenerate Session ID
+                    ------------------------------------------------- */
+
+                    session_regenerate_id(true);
+
+
+                    /* -------------------------------------------------
+                       Store Login Information
+                    ------------------------------------------------- */
+
+                    $_SESSION['user_id'] =
+                        (int)$user['user_id'];
+
+                    $_SESSION['username'] =
+                        $user['username'];
+
+                    $_SESSION['role'] =
+                        strtoupper($user['role']);
+
+
+                    /* -------------------------------------------------
+                       Get Faculty ID
+                    ------------------------------------------------- */
+
+                    if (
+                        $_SESSION['role'] === 'FACULTY'
+                    ) {
+
+                        $faculty_stmt = $conn->prepare("
+                            SELECT
+                                faculty_id
+                            FROM faculty
+                            WHERE user_id = ?
+                            LIMIT 1
+                        ");
+
+
+                        if ($faculty_stmt) {
+
+                            $faculty_stmt->bind_param(
+                                "i",
+                                $user['user_id']
+                            );
+
+                            $faculty_stmt->execute();
+
+                            $faculty_result =
+                                $faculty_stmt->get_result();
+
+
+                            if (
+                                $faculty_result->num_rows === 1
+                            ) {
+
+                                $faculty_row =
+                                    $faculty_result
+                                    ->fetch_assoc();
+
+
+                                $_SESSION['faculty_id'] =
+                                    (int)$faculty_row['faculty_id'];
+
+                            } else {
+
+                                /*
+                                 * Faculty account exists in users
+                                 * but matching faculty record not found.
+                                 */
+
+                                unset(
+                                    $_SESSION['faculty_id']
+                                );
+
+                                $error =
+                                    "Faculty record not found.";
+
+                            }
+
+                            $faculty_stmt->close();
+
+                        } else {
+
+                            $error =
+                                "Unable to load faculty information.";
+                        }
+                    }
+
+
+                    /* -------------------------------------------------
+                       Redirect if no error
+                    ------------------------------------------------- */
+
+                    if ($error === "") {
+
+                        if (
+                            $_SESSION['role'] === 'HOD'
+                        ) {
+
+                            header(
+                                "Location: ../admin/dashboard.php"
+                            );
+
+                            exit;
+
+
+                        } elseif (
+                            $_SESSION['role'] === 'FACULTY'
+                        ) {
+
+                            header(
+                                "Location: ../faculty/dashboard.php"
+                            );
+
+                            exit;
+
+
+                        } elseif (
+                            $_SESSION['role'] === 'STUDENT'
+                        ) {
+
+                            header(
+                                "Location: ../student/dashboard.php"
+                            );
+
+                            exit;
+
+
+                        } else {
+
+                            $error =
+                                "Invalid user role.";
+
+                            session_unset();
+                            session_destroy();
+                        }
+                    }
+
+
+                } else {
+
+                    $error =
+                        "Invalid username or password.";
+                }
+
+
+            } else {
+
+                $error =
+                    "Invalid username or password.";
+            }
+
+
+            $stmt->close();
+        }
     }
 }
-
-$conn->close();
 
 ?>
 
@@ -134,94 +295,98 @@ $conn->close();
 
     <meta charset="UTF-8">
 
-    <meta name="viewport"
-          content="width=device-width, initial-scale=1.0">
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
 
-    <title>Login - Smart Faculty Portal</title>
+    <title>
+        Smart Faculty Portal - Login
+    </title>
 
     <style>
 
-        * {
-            box-sizing: border-box;
-        }
-
         body {
-
-            margin: 0;
 
             font-family: Arial, sans-serif;
 
-            background: #f4f6f9;
+            background: #f4f6f8;
 
-            display: flex;
+            margin: 0;
 
-            justify-content: center;
+            padding: 0;
 
-            align-items: center;
-
-            min-height: 100vh;
         }
+
 
         .login-container {
 
             width: 380px;
 
+            margin: 100px auto;
+
             background: white;
 
-            padding: 35px;
+            padding: 30px;
 
-            border-radius: 12px;
+            border-radius: 8px;
 
-            box-shadow: 0 5px 20px rgba(0,0,0,0.1);
+            box-shadow:
+                0 0 10px
+                rgba(0,0,0,0.1);
+
         }
+
 
         h1 {
 
             text-align: center;
 
-            margin-bottom: 8px;
-        }
-
-        .subtitle {
-
-            text-align: center;
-
-            color: #666;
-
             margin-bottom: 25px;
+
         }
+
 
         label {
 
             display: block;
 
-            margin-bottom: 6px;
+            margin-top: 15px;
+
+            margin-bottom: 5px;
 
             font-weight: bold;
+
         }
 
-        input {
+
+        input[type="text"],
+        input[type="password"] {
 
             width: 100%;
 
-            padding: 12px;
+            padding: 10px;
 
-            margin-bottom: 18px;
+            box-sizing: border-box;
 
             border: 1px solid #ccc;
 
-            border-radius: 6px;
+            border-radius: 4px;
+
         }
+
 
         button {
 
             width: 100%;
 
-            padding: 12px;
+            margin-top: 20px;
+
+            padding: 11px;
 
             border: none;
 
-            border-radius: 6px;
+            border-radius: 4px;
 
             background: #2563eb;
 
@@ -230,87 +395,132 @@ $conn->close();
             font-size: 16px;
 
             cursor: pointer;
+
         }
+
 
         button:hover {
 
             background: #1d4ed8;
+
         }
+
 
         .error {
 
-            background: #fee2e2;
+            color: red;
 
-            color: #b91c1c;
+            background: #ffe5e5;
 
             padding: 10px;
 
-            border-radius: 6px;
+            border-radius: 4px;
 
             margin-bottom: 15px;
 
+        }
+
+
+        .info {
+
+            margin-top: 20px;
+
+            font-size: 13px;
+
+            color: #666;
+
             text-align: center;
+
         }
 
     </style>
 
 </head>
 
+
 <body>
+
 
 <div class="login-container">
 
-    <h1>Smart Faculty Portal</h1>
 
-    <div class="subtitle">
-        Login
-    </div>
+    <h1>
+        Smart Faculty Portal
+    </h1>
 
 
     <?php if ($error !== ""): ?>
 
         <div class="error">
-            <?= htmlspecialchars($error) ?>
+
+            <?php
+            echo htmlspecialchars($error);
+            ?>
+
         </div>
 
     <?php endif; ?>
 
 
-    <form method="POST">
+    <form
+        method="POST"
+        action=""
+    >
+
 
         <label for="username">
+
             Username
+
         </label>
+
 
         <input
             type="text"
             id="username"
             name="username"
-            placeholder="Enter username"
+            value="<?php
+            echo htmlspecialchars($username);
+            ?>"
             required
         >
 
 
         <label for="password">
+
             Password
+
         </label>
+
 
         <input
             type="password"
             id="password"
             name="password"
-            placeholder="Enter password"
             required
         >
 
 
         <button type="submit">
+
             Login
+
         </button>
+
 
     </form>
 
+
+    <div class="info">
+
+        Smart Faculty Assistant & Period-Wise
+        Attendance Management Portal
+
+    </div>
+
+
 </div>
+
 
 </body>
 

@@ -1,36 +1,65 @@
 <?php
 
+session_start();
+
 require_once("../config/db.php");
 
-/*
-|--------------------------------------------------------------------------
-| Testing Alternate Faculty
-|--------------------------------------------------------------------------
-| Faculty ID 2 = CSE002 / Prof. Priya Sharma
-*/
 
-$faculty_id = 2;
+/* -------------------------------------------------
+   Faculty Login Check
+------------------------------------------------- */
+
+if (
+    !isset($_SESSION['user_id'])
+    ||
+    !isset($_SESSION['role'])
+    ||
+    $_SESSION['role'] !== 'FACULTY'
+    ||
+    !isset($_SESSION['faculty_id'])
+) {
+
+    header("Location: ../auth/login.php");
+    exit;
+}
+
+
+/* -------------------------------------------------
+   Logged-in Faculty ID
+------------------------------------------------- */
+
+$faculty_id = (int)$_SESSION['faculty_id'];
+
 
 $message = "";
 $message_color = "green";
 
-$selected_request_id = isset($_GET['request_id'])
-    ? (int)$_GET['request_id']
-    : 0;
 
-$selected_date = $_GET['date'] ?? date('Y-m-d');
+/* -------------------------------------------------
+   Selected Request
+------------------------------------------------- */
+
+$selected_request_id =
+    isset($_GET['request_id'])
+        ? (int)$_GET['request_id']
+        : 0;
 
 
-/*
-|--------------------------------------------------------------------------
-| Get Accepted Handover Requests
-|--------------------------------------------------------------------------
-*/
+$selected_date =
+    $_GET['date'] ?? date('Y-m-d');
+
+
+/* =================================================
+   GET ACCEPTED HANDOVER REQUESTS
+================================================= */
 
 $requests = [];
 
+
 $request_stmt = $conn->prepare("
+
     SELECT
+
         hr.request_id,
         hr.handover_id,
         hr.alternate_faculty_id,
@@ -87,22 +116,29 @@ $request_stmt = $conn->prepare("
         = alternate_faculty.faculty_id
 
     WHERE hr.alternate_faculty_id = ?
+
       AND hr.status = 'ACCEPTED'
+
       AND t.status = 'PUBLISHED'
 
     ORDER BY
         hr.responded_at DESC
+
 ");
+
 
 $request_stmt->bind_param(
     "i",
     $faculty_id
 );
 
+
 $request_stmt->execute();
+
 
 $request_result =
     $request_stmt->get_result();
+
 
 while (
     $row =
@@ -113,11 +149,9 @@ while (
 }
 
 
-/*
-|--------------------------------------------------------------------------
-| Attendance Marking
-|--------------------------------------------------------------------------
-*/
+/* =================================================
+   ATTENDANCE MARKING
+================================================= */
 
 if (
     $_SERVER['REQUEST_METHOD'] === 'POST'
@@ -130,26 +164,28 @@ if (
     )
 ) {
 
+
     $request_id =
         (int)$_POST['request_id'];
+
 
     $student_id =
         (int)$_POST['student_id'];
 
+
     $status =
         strtoupper(
-            $_POST['status']
+            trim($_POST['status'])
         );
+
 
     $attendance_date =
         $_POST['attendance_date'];
 
 
-    /*
-    |--------------------------------------------------------------------------
-    | Validate Status
-    |--------------------------------------------------------------------------
-    */
+    /* -------------------------------------------------
+       Validate Attendance Status
+    ------------------------------------------------- */
 
     if (
         $status !== "PRESENT"
@@ -160,37 +196,43 @@ if (
         $message =
             "Invalid attendance status.";
 
-        $message_color = "red";
+        $message_color =
+            "red";
+
 
     } else {
 
 
-        /*
-        |--------------------------------------------------------------------------
-        | Validate Date
-        |--------------------------------------------------------------------------
-        */
+        /* -------------------------------------------------
+           Validate Date
+        ------------------------------------------------- */
 
-        $today = date('Y-m-d');
+        $today =
+            date('Y-m-d');
 
-        if ($attendance_date > $today) {
+
+        if (
+            $attendance_date > $today
+        ) {
 
             $message =
                 "Future date attendance cannot be marked.";
 
-            $message_color = "red";
+            $message_color =
+                "red";
+
 
         } else {
 
 
-            /*
-            |--------------------------------------------------------------------------
-            | Get Accepted Authorization
-            |--------------------------------------------------------------------------
-            */
+            /* -------------------------------------------------
+               Get Authorization Details
+            ------------------------------------------------- */
 
             $auth_stmt = $conn->prepare("
+
                 SELECT
+
                     hr.request_id,
                     hr.alternate_faculty_id,
                     hr.status AS request_status,
@@ -212,79 +254,109 @@ if (
                     ON ch.timetable_id = t.timetable_id
 
                 WHERE hr.request_id = ?
+
             ");
+
 
             $auth_stmt->bind_param(
                 "i",
                 $request_id
             );
 
+
             $auth_stmt->execute();
+
 
             $auth_result =
                 $auth_stmt->get_result();
+
 
             $authorization =
                 $auth_result->fetch_assoc();
 
 
-            if (!$authorization) {
+            /* -------------------------------------------------
+               Authorization Checks
+            ------------------------------------------------- */
+
+            if (
+                !$authorization
+            ) {
 
                 $message =
                     "Authorization request not found.";
 
-                $message_color = "red";
+                $message_color =
+                    "red";
+
 
             } elseif (
-                (int)$authorization['alternate_faculty_id']
-                !== $faculty_id
+                (int)$authorization[
+                    'alternate_faculty_id'
+                ]
+                !==
+                $faculty_id
             ) {
 
                 $message =
                     "This request is not assigned to this faculty.";
 
-                $message_color = "red";
+                $message_color =
+                    "red";
+
 
             } elseif (
-                $authorization['request_status']
-                !== "ACCEPTED"
+                $authorization[
+                    'request_status'
+                ]
+                !==
+                "ACCEPTED"
             ) {
 
                 $message =
                     "Handover request is not accepted.";
 
-                $message_color = "red";
+                $message_color =
+                    "red";
+
 
             } elseif (
-                $authorization['timetable_status']
-                !== "PUBLISHED"
+                $authorization[
+                    'timetable_status'
+                ]
+                !==
+                "PUBLISHED"
             ) {
 
                 $message =
                     "Timetable is not published.";
 
-                $message_color = "red";
+                $message_color =
+                    "red";
+
 
             } else {
 
 
-                /*
-                |--------------------------------------------------------------------------
-                | Validate Day
-                |--------------------------------------------------------------------------
-                */
+                /* -------------------------------------------------
+                   Validate Day
+                ------------------------------------------------- */
 
-                $day_name = strtoupper(
-                    date(
-                        'l',
-                        strtotime($attendance_date)
-                    )
-                );
+                $day_name =
+                    strtoupper(
+                        date(
+                            'l',
+                            strtotime(
+                                $attendance_date
+                            )
+                        )
+                    );
 
 
                 if (
                     $day_name
-                    !== strtoupper(
+                    !==
+                    strtoupper(
                         $authorization['day']
                     )
                 ) {
@@ -292,45 +364,60 @@ if (
                     $message =
                         "Selected date does not match the class timetable day.";
 
-                    $message_color = "red";
+                    $message_color =
+                        "red";
+
 
                 } else {
 
 
-                    /*
-                    |--------------------------------------------------------------------------
-                    | Validate Student
-                    |--------------------------------------------------------------------------
-                    */
+                    /* -------------------------------------------------
+                       Validate Student
+                    ------------------------------------------------- */
 
                     $student_stmt = $conn->prepare("
+
                         SELECT
+
                             student_id,
                             section_id
+
                         FROM students
+
                         WHERE student_id = ?
+
                     ");
+
 
                     $student_stmt->bind_param(
                         "i",
                         $student_id
                     );
 
+
                     $student_stmt->execute();
 
+
                     $student_result =
-                        $student_stmt->get_result();
+                        $student_stmt
+                        ->get_result();
+
 
                     $student =
-                        $student_result->fetch_assoc();
+                        $student_result
+                        ->fetch_assoc();
 
 
-                    if (!$student) {
+                    if (
+                        !$student
+                    ) {
 
                         $message =
                             "Student not found.";
 
-                        $message_color = "red";
+                        $message_color =
+                            "red";
+
 
                     } elseif (
                         (int)$student['section_id']
@@ -341,38 +428,52 @@ if (
                         $message =
                             "Student does not belong to this class section.";
 
-                        $message_color = "red";
+                        $message_color =
+                            "red";
+
 
                     } else {
 
 
-                        /*
-                        |--------------------------------------------------------------------------
-                        | Duplicate Check
-                        |--------------------------------------------------------------------------
-                        */
+                        /* -------------------------------------------------
+                           Duplicate Attendance Check
+                        ------------------------------------------------- */
 
-                        $duplicate_stmt = $conn->prepare("
-                            SELECT
-                                attendance_id,
-                                status
-                            FROM attendance
-                            WHERE timetable_id = ?
-                              AND student_id = ?
-                              AND attendance_date = ?
-                        ");
+                        $duplicate_stmt =
+                            $conn->prepare("
+
+                                SELECT
+
+                                    attendance_id,
+                                    status
+
+                                FROM attendance
+
+                                WHERE timetable_id = ?
+
+                                  AND student_id = ?
+
+                                  AND attendance_date = ?
+
+                            ");
+
 
                         $duplicate_stmt->bind_param(
                             "iis",
-                            $authorization['timetable_id'],
+                            $authorization[
+                                'timetable_id'
+                            ],
                             $student_id,
                             $attendance_date
                         );
 
+
                         $duplicate_stmt->execute();
 
+
                         $duplicate_result =
-                            $duplicate_stmt->get_result();
+                            $duplicate_stmt
+                            ->get_result();
 
 
                         if (
@@ -380,40 +481,58 @@ if (
                         ) {
 
                             $existing =
-                                $duplicate_result->fetch_assoc();
+                                $duplicate_result
+                                ->fetch_assoc();
+
 
                             $message =
                                 "Attendance already marked as "
                                 . $existing['status']
                                 . ".";
 
-                            $message_color = "red";
+
+                            $message_color =
+                                "red";
+
 
                         } else {
 
 
-                            /*
-                            |--------------------------------------------------------------------------
-                            | Insert Attendance
-                            |--------------------------------------------------------------------------
-                            */
+                            /* -------------------------------------------------
+                               Insert Attendance
+                            ------------------------------------------------- */
 
-                            $insert_stmt = $conn->prepare("
-                                INSERT INTO attendance
-                                (
-                                    timetable_id,
-                                    student_id,
-                                    faculty_id,
-                                    attendance_date,
-                                    status,
-                                    marked_at
-                                )
-                                VALUES (?, ?, ?, ?, ?, NOW())
-                            ");
+                            $insert_stmt =
+                                $conn->prepare("
+
+                                    INSERT INTO attendance
+                                    (
+                                        timetable_id,
+                                        student_id,
+                                        faculty_id,
+                                        attendance_date,
+                                        status,
+                                        marked_at
+                                    )
+
+                                    VALUES
+                                    (
+                                        ?,
+                                        ?,
+                                        ?,
+                                        ?,
+                                        ?,
+                                        NOW()
+                                    )
+
+                                ");
+
 
                             $insert_stmt->bind_param(
                                 "iiiss",
-                                $authorization['timetable_id'],
+                                $authorization[
+                                    'timetable_id'
+                                ],
                                 $student_id,
                                 $faculty_id,
                                 $attendance_date,
@@ -430,14 +549,17 @@ if (
                                     . $status
                                     . " successfully.";
 
-                                $message_color = "green";
+                                $message_color =
+                                    "green";
+
 
                             } else {
 
                                 $message =
                                     "Error while saving attendance.";
 
-                                $message_color = "red";
+                                $message_color =
+                                    "red";
                             }
                         }
                     }
@@ -447,11 +569,9 @@ if (
     }
 
 
-    /*
-    |--------------------------------------------------------------------------
-    | Keep Selected Request
-    |--------------------------------------------------------------------------
-    */
+    /* -------------------------------------------------
+       Keep Selected Request / Date
+    ------------------------------------------------- */
 
     $selected_request_id =
         $request_id;
@@ -461,18 +581,22 @@ if (
 }
 
 
-/*
-|--------------------------------------------------------------------------
-| Get Selected Request Details
-|--------------------------------------------------------------------------
-*/
+/* =================================================
+   GET SELECTED REQUEST DETAILS
+================================================= */
 
 $selected_request = null;
 
-if ($selected_request_id > 0) {
+
+if (
+    $selected_request_id > 0
+) {
+
 
     $selected_stmt = $conn->prepare("
+
         SELECT
+
             hr.request_id,
             hr.handover_id,
             hr.alternate_faculty_id,
@@ -529,9 +653,13 @@ if ($selected_request_id > 0) {
             = alternate_faculty.faculty_id
 
         WHERE hr.request_id = ?
+
           AND hr.alternate_faculty_id = ?
+
           AND hr.status = 'ACCEPTED'
+
     ");
+
 
     $selected_stmt->bind_param(
         "ii",
@@ -539,7 +667,9 @@ if ($selected_request_id > 0) {
         $faculty_id
     );
 
+
     $selected_stmt->execute();
+
 
     $selected_request =
         $selected_stmt
@@ -548,43 +678,60 @@ if ($selected_request_id > 0) {
 }
 
 
-/*
-|--------------------------------------------------------------------------
-| Get Students
-|--------------------------------------------------------------------------
-*/
+/* =================================================
+   GET STUDENTS
+================================================= */
 
 $students = [];
 
-if ($selected_request) {
 
-    $student_list_stmt = $conn->prepare("
-        SELECT
-            student_id,
-            register_number,
-            student_name,
-            section_id
-        FROM students
-        WHERE section_id = ?
-        ORDER BY register_number
-    ");
+if (
+    $selected_request
+) {
+
+
+    $student_list_stmt =
+        $conn->prepare("
+
+            SELECT
+
+                student_id,
+                register_number,
+                student_name,
+                section_id
+
+            FROM students
+
+            WHERE section_id = ?
+
+            ORDER BY register_number
+
+        ");
+
 
     $student_list_stmt->bind_param(
         "i",
-        $selected_request['section_id']
+        $selected_request[
+            'section_id'
+        ]
     );
+
 
     $student_list_stmt->execute();
 
+
     $student_list_result =
-        $student_list_stmt->get_result();
+        $student_list_stmt
+        ->get_result();
+
 
     while (
         $row =
         $student_list_result->fetch_assoc()
     ) {
 
-        $students[] = $row;
+        $students[] =
+            $row;
     }
 }
 
@@ -602,6 +749,7 @@ if ($selected_request) {
 
 </head>
 
+
 <body>
 
 
@@ -610,30 +758,29 @@ if ($selected_request) {
 </h1>
 
 
-<?php if ($message !== ""): ?>
-
-    <p style="color: <?php echo $message_color; ?>;">
-
-        <strong>
-
-            <?php
-            echo htmlspecialchars($message);
-            ?>
-
-        </strong>
-
-    </p>
-
-<?php endif; ?>
-
-
-<!-- =========================================================
+<!-- =================================================
      FACULTY DETAILS
-========================================================= -->
+================================================= -->
 
 <h2>
     Faculty Details
 </h2>
+
+
+<p>
+
+    <strong>
+        Logged-in Faculty:
+    </strong>
+
+    <?php
+    echo htmlspecialchars(
+        $_SESSION['username']
+    );
+    ?>
+
+</p>
+
 
 <p>
 
@@ -648,19 +795,45 @@ if ($selected_request) {
 </p>
 
 
+<?php if ($message !== ""): ?>
+
+    <p
+        style="color:
+        <?php
+        echo $message_color;
+        ?>;"
+    >
+
+        <strong>
+
+            <?php
+            echo htmlspecialchars(
+                $message
+            );
+            ?>
+
+        </strong>
+
+    </p>
+
+<?php endif; ?>
+
+
 <hr>
 
 
-<!-- =========================================================
+<!-- =================================================
      ACCEPTED HANDOVER REQUESTS
-========================================================= -->
+================================================= -->
 
 <h2>
     Accepted Handover Requests
 </h2>
 
 
-<?php if (count($requests) == 0): ?>
+<?php if (
+    count($requests) == 0
+): ?>
 
     <p style="color:red;">
 
@@ -702,6 +875,10 @@ if ($selected_request) {
             </th>
 
             <th>
+                Alternate Faculty
+            </th>
+
+            <th>
                 Status
             </th>
 
@@ -712,15 +889,21 @@ if ($selected_request) {
         </tr>
 
 
-        <?php foreach ($requests as $request): ?>
+        <?php foreach (
+            $requests
+            as $request
+        ): ?>
 
 
             <tr>
 
+
                 <td>
 
                     <?php
-                    echo $request['request_id'];
+                    echo $request[
+                        'request_id'
+                    ];
                     ?>
 
                 </td>
@@ -730,7 +913,9 @@ if ($selected_request) {
 
                     <?php
                     echo htmlspecialchars(
-                        $request['subject_code']
+                        $request[
+                            'subject_code'
+                        ]
                     );
                     ?>
 
@@ -738,7 +923,9 @@ if ($selected_request) {
 
                     <?php
                     echo htmlspecialchars(
-                        $request['subject_name']
+                        $request[
+                            'subject_name'
+                        ]
                     );
                     ?>
 
@@ -749,7 +936,9 @@ if ($selected_request) {
 
                     <?php
                     echo htmlspecialchars(
-                        $request['section_name']
+                        $request[
+                            'section_name'
+                        ]
                     );
                     ?>
 
@@ -759,7 +948,9 @@ if ($selected_request) {
                 <td>
 
                     <?php
-                    echo $request['period_number'];
+                    echo $request[
+                        'period_number'
+                    ];
                     ?>
 
                     <br>
@@ -768,7 +959,9 @@ if ($selected_request) {
                     echo date(
                         "H:i",
                         strtotime(
-                            $request['start_time']
+                            $request[
+                                'start_time'
+                            ]
                         )
                     );
                     ?>
@@ -779,7 +972,9 @@ if ($selected_request) {
                     echo date(
                         "H:i",
                         strtotime(
-                            $request['end_time']
+                            $request[
+                                'end_time'
+                            ]
                         )
                     );
                     ?>
@@ -791,7 +986,22 @@ if ($selected_request) {
 
                     <?php
                     echo htmlspecialchars(
-                        $request['original_faculty_name']
+                        $request[
+                            'original_faculty_name'
+                        ]
+                    );
+                    ?>
+
+                </td>
+
+
+                <td>
+
+                    <?php
+                    echo htmlspecialchars(
+                        $request[
+                            'alternate_faculty_name'
+                        ]
                     );
                     ?>
 
@@ -804,7 +1014,9 @@ if ($selected_request) {
 
                         <?php
                         echo htmlspecialchars(
-                            $request['status']
+                            $request[
+                                'status'
+                            ]
                         );
                         ?>
 
@@ -817,9 +1029,13 @@ if ($selected_request) {
 
                     <a
                         href="?request_id=<?php
-                        echo $request['request_id'];
+                        echo $request[
+                            'request_id'
+                        ];
                         ?>&date=<?php
-                        echo urlencode($selected_date);
+                        echo urlencode(
+                            $selected_date
+                        );
                         ?>"
                     >
 
@@ -828,6 +1044,7 @@ if ($selected_request) {
                     </a>
 
                 </td>
+
 
             </tr>
 
@@ -844,11 +1061,13 @@ if ($selected_request) {
 <hr>
 
 
-<!-- =========================================================
-     SELECTED CLASS
-========================================================= -->
+<!-- =================================================
+     AUTHORIZED CLASS
+================================================= -->
 
-<?php if ($selected_request): ?>
+<?php if (
+    $selected_request
+): ?>
 
 
     <h2>
@@ -860,6 +1079,7 @@ if ($selected_request) {
         border="1"
         cellpadding="10"
     >
+
 
         <tr>
 
@@ -890,7 +1110,9 @@ if ($selected_request) {
 
                 <?php
                 echo htmlspecialchars(
-                    $selected_request['day']
+                    $selected_request[
+                        'day'
+                    ]
                 );
                 ?>
 
@@ -909,7 +1131,9 @@ if ($selected_request) {
 
                 <?php
                 echo htmlspecialchars(
-                    $selected_request['subject_code']
+                    $selected_request[
+                        'subject_code'
+                    ]
                 );
                 ?>
 
@@ -917,7 +1141,9 @@ if ($selected_request) {
 
                 <?php
                 echo htmlspecialchars(
-                    $selected_request['subject_name']
+                    $selected_request[
+                        'subject_name'
+                    ]
                 );
                 ?>
 
@@ -936,7 +1162,9 @@ if ($selected_request) {
 
                 <?php
                 echo htmlspecialchars(
-                    $selected_request['section_name']
+                    $selected_request[
+                        'section_name'
+                    ]
                 );
                 ?>
 
@@ -955,7 +1183,9 @@ if ($selected_request) {
 
                 <?php
                 echo htmlspecialchars(
-                    $selected_request['original_faculty_name']
+                    $selected_request[
+                        'original_faculty_name'
+                    ]
                 );
                 ?>
 
@@ -974,7 +1204,9 @@ if ($selected_request) {
 
                 <?php
                 echo htmlspecialchars(
-                    $selected_request['alternate_faculty_name']
+                    $selected_request[
+                        'alternate_faculty_name'
+                    ]
                 );
                 ?>
 
@@ -995,7 +1227,9 @@ if ($selected_request) {
 
                     <?php
                     echo htmlspecialchars(
-                        $selected_request['request_status']
+                        $selected_request[
+                            'request_status'
+                        ]
                     );
                     ?>
 
@@ -1005,15 +1239,16 @@ if ($selected_request) {
 
         </tr>
 
+
     </table>
 
 
     <hr>
 
 
-    <!-- =====================================================
-         DATE SELECTION
-    ====================================================== -->
+    <!-- =================================================
+         ATTENDANCE DATE
+    ================================================== -->
 
     <h2>
         Attendance Date
@@ -1021,6 +1256,7 @@ if ($selected_request) {
 
 
     <form method="GET">
+
 
         <input
             type="hidden"
@@ -1058,28 +1294,33 @@ if ($selected_request) {
 
         </button>
 
+
     </form>
 
 
     <hr>
 
 
-    <!-- =====================================================
+    <!-- =================================================
          STUDENT ATTENDANCE
-    ====================================================== -->
+    ================================================== -->
 
     <h2>
         Student Attendance
     </h2>
 
 
-    <?php if (count($students) == 0): ?>
+    <?php if (
+        count($students) == 0
+    ): ?>
 
 
         <p style="color:red;">
 
             <strong>
+
                 No students found for this section.
+
             </strong>
 
         </p>
@@ -1092,6 +1333,7 @@ if ($selected_request) {
             border="1"
             cellpadding="10"
         >
+
 
             <tr>
 
@@ -1114,15 +1356,21 @@ if ($selected_request) {
             </tr>
 
 
-            <?php foreach ($students as $student): ?>
+            <?php foreach (
+                $students
+                as $student
+            ): ?>
 
 
                 <tr>
 
+
                     <td>
 
                         <?php
-                        echo $student['student_id'];
+                        echo $student[
+                            'student_id'
+                        ];
                         ?>
 
                     </td>
@@ -1132,7 +1380,9 @@ if ($selected_request) {
 
                         <?php
                         echo htmlspecialchars(
-                            $student['register_number']
+                            $student[
+                                'register_number'
+                            ]
                         );
                         ?>
 
@@ -1143,7 +1393,9 @@ if ($selected_request) {
 
                         <?php
                         echo htmlspecialchars(
-                            $student['student_name']
+                            $student[
+                                'student_name'
+                            ]
                         );
                         ?>
 
@@ -1153,12 +1405,15 @@ if ($selected_request) {
                     <td>
 
 
-                        <!-- Present -->
+                        <!-- =====================================
+                             PRESENT
+                        ====================================== -->
 
                         <form
                             method="POST"
                             style="display:inline;"
                         >
+
 
                             <input
                                 type="hidden"
@@ -1168,13 +1423,17 @@ if ($selected_request) {
                                 ?>"
                             >
 
+
                             <input
                                 type="hidden"
                                 name="student_id"
                                 value="<?php
-                                echo $student['student_id'];
+                                echo $student[
+                                    'student_id'
+                                ];
                                 ?>"
                             >
+
 
                             <input
                                 type="hidden"
@@ -1185,6 +1444,7 @@ if ($selected_request) {
                                 );
                                 ?>"
                             >
+
 
                             <input
                                 type="hidden"
@@ -1192,21 +1452,28 @@ if ($selected_request) {
                                 value="PRESENT"
                             >
 
-                            <button type="submit">
+
+                            <button
+                                type="submit"
+                            >
 
                                 Present
 
                             </button>
 
+
                         </form>
 
 
-                        <!-- Absent -->
+                        <!-- =====================================
+                             ABSENT
+                        ====================================== -->
 
                         <form
                             method="POST"
                             style="display:inline;"
                         >
+
 
                             <input
                                 type="hidden"
@@ -1216,13 +1483,17 @@ if ($selected_request) {
                                 ?>"
                             >
 
+
                             <input
                                 type="hidden"
                                 name="student_id"
                                 value="<?php
-                                echo $student['student_id'];
+                                echo $student[
+                                    'student_id'
+                                ];
                                 ?>"
                             >
+
 
                             <input
                                 type="hidden"
@@ -1234,22 +1505,28 @@ if ($selected_request) {
                                 ?>"
                             >
 
+
                             <input
                                 type="hidden"
                                 name="status"
                                 value="ABSENT"
                             >
 
-                            <button type="submit">
+
+                            <button
+                                type="submit"
+                            >
 
                                 Absent
 
                             </button>
 
+
                         </form>
 
 
                     </td>
+
 
                 </tr>
 

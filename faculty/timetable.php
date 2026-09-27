@@ -5,7 +5,29 @@ requireRole('FACULTY');
 
 require_once "../config/database.php";
 
-$faculty_id = $_SESSION['user_id'];
+$user_id = $_SESSION['user_id'];
+
+$faculty_sql = "
+    SELECT faculty_id
+    FROM faculty
+    WHERE user_id = ?
+    LIMIT 1
+";
+
+$faculty_stmt = $conn->prepare($faculty_sql);
+$faculty_stmt->bind_param("i", $user_id);
+$faculty_stmt->execute();
+
+$faculty_result = $faculty_stmt->get_result();
+
+if ($faculty_result->num_rows === 0) {
+    die("Faculty record not found.");
+}
+
+$faculty = $faculty_result->fetch_assoc();
+$faculty_id = $faculty['faculty_id'];
+
+$faculty_stmt->close();
 
 $sql = "
     SELECT

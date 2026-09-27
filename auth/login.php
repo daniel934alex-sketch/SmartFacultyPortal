@@ -76,6 +76,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             LIMIT 1
         ");
 
+
         if (!$stmt) {
 
             $error = "Database query error.";
@@ -203,7 +204,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                                 $error =
                                     "Faculty record not found.";
-
                             }
 
                             $faculty_stmt->close();
@@ -212,6 +212,68 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                             $error =
                                 "Unable to load faculty information.";
+                        }
+                    }
+
+
+                    /* -------------------------------------------------
+                       Get Student ID
+                    ------------------------------------------------- */
+
+                    if (
+                        $_SESSION['role'] === 'STUDENT'
+                    ) {
+
+                        $student_stmt = $conn->prepare("
+                            SELECT
+                                student_id
+                            FROM students
+                            WHERE user_id = ?
+                            LIMIT 1
+                        ");
+
+
+                        if ($student_stmt) {
+
+                            $student_stmt->bind_param(
+                                "i",
+                                $user['user_id']
+                            );
+
+                            $student_stmt->execute();
+
+                            $student_result =
+                                $student_stmt->get_result();
+
+
+                            if (
+                                $student_result->num_rows === 1
+                            ) {
+
+                                $student_row =
+                                    $student_result
+                                    ->fetch_assoc();
+
+
+                                $_SESSION['student_id'] =
+                                    (int)$student_row['student_id'];
+
+                            } else {
+
+                                unset(
+                                    $_SESSION['student_id']
+                                );
+
+                                $error =
+                                    "Student record not found.";
+                            }
+
+                            $student_stmt->close();
+
+                        } else {
+
+                            $error =
+                                "Unable to load student information.";
                         }
                     }
 
@@ -287,6 +349,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 ?>
 
+
 <!DOCTYPE html>
 
 <html lang="en">
@@ -304,6 +367,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         Smart Faculty Portal - Login
     </title>
 
+
     <style>
 
         body {
@@ -315,7 +379,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             margin: 0;
 
             padding: 0;
-
         }
 
 
@@ -334,7 +397,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             box-shadow:
                 0 0 10px
                 rgba(0,0,0,0.1);
-
         }
 
 
@@ -343,7 +405,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             text-align: center;
 
             margin-bottom: 25px;
-
         }
 
 
@@ -356,7 +417,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             margin-bottom: 5px;
 
             font-weight: bold;
-
         }
 
 
@@ -372,7 +432,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             border: 1px solid #ccc;
 
             border-radius: 4px;
-
         }
 
 
@@ -395,14 +454,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             font-size: 16px;
 
             cursor: pointer;
-
         }
 
 
         button:hover {
 
             background: #1d4ed8;
-
         }
 
 
@@ -417,7 +474,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             border-radius: 4px;
 
             margin-bottom: 15px;
-
         }
 
 
@@ -430,7 +486,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             color: #666;
 
             text-align: center;
-
         }
 
     </style>

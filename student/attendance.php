@@ -1,15 +1,37 @@
 <?php
 
+session_start();
+
 require_once("../config/db.php");
+
 
 /*
 |--------------------------------------------------------------------------
-| Testing Student
+| Student Login Check
 |--------------------------------------------------------------------------
-| Later this student_id will come from login/session.
 */
 
-$student_id = 1;
+if (
+    !isset($_SESSION['user_id'])
+    ||
+    !isset($_SESSION['role'])
+    ||
+    $_SESSION['role'] !== 'STUDENT'
+    ||
+    !isset($_SESSION['student_id'])
+) {
+    header("Location: ../auth/login.php");
+    exit;
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| Get Logged-in Student ID
+|--------------------------------------------------------------------------
+*/
+
+$student_id = (int)$_SESSION['student_id'];
 
 
 /*
@@ -24,9 +46,11 @@ $student_stmt = $conn->prepare("
         register_number,
         student_name,
         email,
+        phone,
         section_id
     FROM students
     WHERE student_id = ?
+    LIMIT 1
 ");
 
 $student_stmt->bind_param(
@@ -40,6 +64,8 @@ $student_result = $student_stmt->get_result();
 
 $student = $student_result->fetch_assoc();
 
+$student_stmt->close();
+
 
 /*
 |--------------------------------------------------------------------------
@@ -52,9 +78,11 @@ $present_classes = 0;
 $absent_classes = 0;
 $percentage = 0;
 
+
 $overall_stmt = $conn->prepare("
     SELECT
         COUNT(*) AS total_classes,
+
         SUM(
             CASE
                 WHEN status = 'PRESENT'
@@ -62,6 +90,7 @@ $overall_stmt = $conn->prepare("
                 ELSE 0
             END
         ) AS present_classes,
+
         SUM(
             CASE
                 WHEN status = 'ABSENT'
@@ -69,9 +98,12 @@ $overall_stmt = $conn->prepare("
                 ELSE 0
             END
         ) AS absent_classes
+
     FROM attendance
+
     WHERE student_id = ?
 ");
+
 
 $overall_stmt->bind_param(
     "i",
@@ -81,6 +113,7 @@ $overall_stmt->bind_param(
 $overall_stmt->execute();
 
 $overall_result = $overall_stmt->get_result();
+
 
 if ($overall_result->num_rows > 0) {
 
@@ -95,6 +128,9 @@ if ($overall_result->num_rows > 0) {
     $absent_classes =
         (int)$overall['absent_classes'];
 }
+
+
+$overall_stmt->close();
 
 
 /*
@@ -118,11 +154,14 @@ if ($total_classes > 0) {
 
 $subject_attendance = [];
 
+
 $subject_stmt = $conn->prepare("
     SELECT
         s.subject_code,
         s.subject_name,
+
         COUNT(*) AS total_classes,
+
         SUM(
             CASE
                 WHEN a.status = 'PRESENT'
@@ -130,6 +169,7 @@ $subject_stmt = $conn->prepare("
                 ELSE 0
             END
         ) AS present_classes,
+
         SUM(
             CASE
                 WHEN a.status = 'ABSENT'
@@ -137,6 +177,7 @@ $subject_stmt = $conn->prepare("
                 ELSE 0
             END
         ) AS absent_classes
+
     FROM attendance a
 
     INNER JOIN timetable t
@@ -156,6 +197,7 @@ $subject_stmt = $conn->prepare("
         s.subject_code
 ");
 
+
 $subject_stmt->bind_param(
     "i",
     $student_id
@@ -165,6 +207,7 @@ $subject_stmt->execute();
 
 $subject_result =
     $subject_stmt->get_result();
+
 
 while (
     $row =
@@ -179,18 +222,24 @@ while (
 
     $subject_percentage = 0;
 
+
     if ($subject_total > 0) {
 
         $subject_percentage =
             ($subject_present / $subject_total) * 100;
     }
 
+
     $row['percentage'] =
         $subject_percentage;
+
 
     $subject_attendance[] =
         $row;
 }
+
+
+$subject_stmt->close();
 
 
 /*
@@ -201,12 +250,15 @@ while (
 
 $records = [];
 
+
 $history_stmt = $conn->prepare("
     SELECT
         a.attendance_date,
         a.status,
+        a.attendance_id,
         s.subject_code,
         s.subject_name
+
     FROM attendance a
 
     INNER JOIN timetable t
@@ -222,6 +274,7 @@ $history_stmt = $conn->prepare("
         a.attendance_id DESC
 ");
 
+
 $history_stmt->bind_param(
     "i",
     $student_id
@@ -232,6 +285,7 @@ $history_stmt->execute();
 $history_result =
     $history_stmt->get_result();
 
+
 while (
     $row =
     $history_result->fetch_assoc()
@@ -240,15 +294,27 @@ while (
     $records[] = $row;
 }
 
+
+$history_stmt->close();
+
 ?>
 
 <!DOCTYPE html>
 
-<html>
+<html lang="en">
 
 <head>
 
-    <title>Student Attendance</title>
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>
+        Student Attendance
+    </title>
 
 </head>
 
@@ -348,6 +414,23 @@ while (
             <?php
             echo htmlspecialchars(
                 $student['email']
+            );
+            ?>
+        </td>
+
+    </tr>
+
+
+    <tr>
+
+        <th>
+            Phone
+        </th>
+
+        <td>
+            <?php
+            echo htmlspecialchars(
+                $student['phone'] ?? ''
             );
             ?>
         </td>

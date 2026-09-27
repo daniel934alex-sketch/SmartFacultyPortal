@@ -1,17 +1,44 @@
 <?php
 
+session_start();
+
 require_once("../config/db.php");
 
-/* --------------------------------
-   Testing Student
--------------------------------- */
 
-$student_id = 1;
+/*
+|--------------------------------------------------------------------------
+| Student Login Check
+|--------------------------------------------------------------------------
+*/
+
+if (
+    !isset($_SESSION['user_id'])
+    ||
+    !isset($_SESSION['role'])
+    ||
+    $_SESSION['role'] !== 'STUDENT'
+    ||
+    !isset($_SESSION['student_id'])
+) {
+    header("Location: ../auth/login.php");
+    exit;
+}
 
 
-/* --------------------------------
-   Get Student Details
--------------------------------- */
+/*
+|--------------------------------------------------------------------------
+| Get Logged-in Student ID
+|--------------------------------------------------------------------------
+*/
+
+$student_id = (int)$_SESSION['student_id'];
+
+
+/*
+|--------------------------------------------------------------------------
+| Get Student Details
+|--------------------------------------------------------------------------
+*/
 
 $student_stmt = $conn->prepare("
     SELECT
@@ -20,6 +47,7 @@ $student_stmt = $conn->prepare("
         student_name
     FROM students
     WHERE student_id = ?
+    LIMIT 1
 ");
 
 $student_stmt->bind_param(
@@ -33,10 +61,14 @@ $student = $student_stmt
     ->get_result()
     ->fetch_assoc();
 
+$student_stmt->close();
 
-/* --------------------------------
-   Get Attendance History
--------------------------------- */
+
+/*
+|--------------------------------------------------------------------------
+| Get Attendance History
+|--------------------------------------------------------------------------
+*/
 
 $history = [];
 
@@ -49,6 +81,7 @@ $history_stmt = $conn->prepare("
         p.period_number,
         p.start_time,
         p.end_time
+
     FROM attendance a
 
     INNER JOIN timetable t
@@ -77,6 +110,7 @@ $history_stmt->execute();
 $history_result =
     $history_stmt->get_result();
 
+
 while (
     $row =
     $history_result->fetch_assoc()
@@ -85,17 +119,30 @@ while (
     $history[] = $row;
 }
 
+$history_stmt->close();
+
 ?>
+
 
 <!DOCTYPE html>
 
-<html>
+<html lang="en">
 
 <head>
 
-    <title>Attendance History</title>
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>
+        Attendance History
+    </title>
 
 </head>
+
 
 <body>
 
@@ -106,7 +153,6 @@ while (
 
 
 <?php if (!$student): ?>
-
 
     <p style="color:red;">
 
@@ -132,9 +178,11 @@ while (
         </strong>
 
         <?php
+
         echo htmlspecialchars(
             $student['register_number']
         );
+
         ?>
 
     </p>
@@ -147,9 +195,11 @@ while (
         </strong>
 
         <?php
+
         echo htmlspecialchars(
             $student['student_name']
         );
+
         ?>
 
     </p>
@@ -164,7 +214,6 @@ while (
 
 
     <?php if (count($history) == 0): ?>
-
 
         <p style="color:red;">
 
@@ -224,9 +273,11 @@ while (
                     <td>
 
                         <?php
+
                         echo htmlspecialchars(
                             $record['attendance_date']
                         );
+
                         ?>
 
                     </td>
@@ -235,7 +286,9 @@ while (
                     <td>
 
                         <?php
+
                         echo $record['period_number'];
+
                         ?>
 
                     </td>
@@ -276,9 +329,11 @@ while (
                     <td>
 
                         <?php
+
                         echo htmlspecialchars(
                             $record['subject_code']
                         );
+
                         ?>
 
                     </td>
@@ -287,9 +342,11 @@ while (
                     <td>
 
                         <?php
+
                         echo htmlspecialchars(
                             $record['subject_name']
                         );
+
                         ?>
 
                     </td>
@@ -300,9 +357,11 @@ while (
                         <strong>
 
                             <?php
+
                             echo htmlspecialchars(
                                 $record['status']
                             );
+
                             ?>
 
                         </strong>

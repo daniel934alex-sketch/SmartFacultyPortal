@@ -3,29 +3,50 @@
 require_once "../includes/auth-check.php";
 require_once "../includes/role-check.php";
 
-requireRole('HOD');
+requireRole("HOD");
 
 require_once "../config/database.php";
-require_once "../config/config.php";
 
 $pageTitle = "Add Faculty";
 
-$error = "";
-$success = "";
 
+/*
+|--------------------------------------------------------------------------
+| Form Values
+|--------------------------------------------------------------------------
+*/
+
+$faculty_code = "";
+$faculty_name = "";
+$username = "";
+$email = "";
+$phone = "";
+$designation = "Assistant Professor";
+
+$is_hod = 0;
+
+$error = "";
+
+
+/*
+|--------------------------------------------------------------------------
+| Form Submission
+|--------------------------------------------------------------------------
+*/
 
 if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
-    $faculty_code = trim($_POST['faculty_code']);
-    $faculty_name = trim($_POST['faculty_name']);
-    $username = trim($_POST['username']);
-    $password = $_POST['password'];
+    $faculty_code = trim($_POST["faculty_code"] ?? "");
+    $faculty_name = trim($_POST["faculty_name"] ?? "");
+    $username = trim($_POST["username"] ?? "");
+    $password = $_POST["password"] ?? "";
+    $email = trim($_POST["email"] ?? "");
+    $phone = trim($_POST["phone"] ?? "");
+    $designation = trim(
+        $_POST["designation"] ?? "Assistant Professor"
+    );
 
-    $email = trim($_POST['email']);
-    $phone = trim($_POST['phone']);
-    $designation = trim($_POST['designation']);
-
-    $is_hod = isset($_POST['is_hod']) ? 1 : 0;
+    $is_hod = isset($_POST["is_hod"]) ? 1 : 0;
 
 
     /*
@@ -34,223 +55,331 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
     |--------------------------------------------------------------------------
     */
 
-    if (
-        $faculty_code === "" ||
-        $faculty_name === "" ||
-        $username === "" ||
-        $password === ""
-    ) {
+    if ($faculty_code === "") {
 
-        $error = "Please fill all required fields.";
+        $error = "Please enter the faculty code.";
 
-    } else {
+    } elseif ($faculty_name === "") {
 
+        $error = "Please enter the faculty name.";
 
-        /*
-        |--------------------------------------------------------------------------
-        | Check duplicate username
-        |--------------------------------------------------------------------------
-        */
+    } elseif ($username === "") {
 
-        $stmt = $conn->prepare(
-            "SELECT user_id
-             FROM users
-             WHERE username = ?"
-        );
+        $error = "Please enter the username.";
 
-        $stmt->bind_param(
-            "s",
-            $username
-        );
+    } elseif ($password === "") {
 
-        $stmt->execute();
+        $error = "Please enter the password.";
 
-        $userResult = $stmt->get_result();
+    } elseif (strlen($password) < 6) {
+
+        $error = "Password must contain at least 6 characters.";
+
+    } elseif ($designation === "") {
+
+        $error = "Please enter the designation.";
+
+    }
 
 
-        /*
-        |--------------------------------------------------------------------------
-        | Check duplicate faculty code
-        |--------------------------------------------------------------------------
-        */
+    /*
+    |--------------------------------------------------------------------------
+    | Check Duplicate Faculty Code
+    |--------------------------------------------------------------------------
+    */
 
-        $stmt2 = $conn->prepare(
-            "SELECT faculty_id
-             FROM faculty
-             WHERE faculty_code = ?"
-        );
+    if ($error === "") {
 
-        $stmt2->bind_param(
-            "s",
-            $faculty_code
-        );
+        $sql = "
+            SELECT faculty_id
+            FROM faculty
+            WHERE faculty_code = ?
+            LIMIT 1
+        ";
 
-        $stmt2->execute();
+        $stmt = $conn->prepare($sql);
 
-        $facultyResult = $stmt2->get_result();
+        if (!$stmt) {
 
-
-        if ($userResult->num_rows > 0) {
-
-            $error = "Username already exists.";
-
-        } elseif ($facultyResult->num_rows > 0) {
-
-            $error = "Faculty code already exists.";
+            $error = "Database error.";
 
         } else {
 
+            $stmt->bind_param(
+                "s",
+                $faculty_code
+            );
+
+            $stmt->execute();
+
+            $result = $stmt->get_result();
+
+            if ($result->num_rows > 0) {
+
+                $error =
+                    "Faculty code already exists.";
+            }
+
+            $stmt->close();
+        }
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Check Duplicate Username
+    |--------------------------------------------------------------------------
+    */
+
+    if ($error === "") {
+
+        $sql = "
+            SELECT user_id
+            FROM users
+            WHERE username = ?
+            LIMIT 1
+        ";
+
+        $stmt = $conn->prepare($sql);
+
+        if (!$stmt) {
+
+            $error = "Database error.";
+
+        } else {
+
+            $stmt->bind_param(
+                "s",
+                $username
+            );
+
+            $stmt->execute();
+
+            $result = $stmt->get_result();
+
+            if ($result->num_rows > 0) {
+
+                $error =
+                    "Username already exists.";
+            }
+
+            $stmt->close();
+        }
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Check Existing HOD
+    |--------------------------------------------------------------------------
+    */
+
+    if (
+        $error === "" &&
+        $is_hod === 1
+    ) {
+
+        $sql = "
+            SELECT faculty_id
+            FROM faculty
+            WHERE is_hod = 1
+            LIMIT 1
+        ";
+
+        $result = $conn->query($sql);
+
+        if (
+            $result &&
+            $result->num_rows > 0
+        ) {
+
+            $error =
+                "A HOD already exists. Please edit the current HOD before assigning another HOD.";
+        }
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Create Faculty
+    |--------------------------------------------------------------------------
+    */
+
+    if ($error === "") {
+
+        $conn->begin_transaction();
+
+        try {
 
             /*
             |--------------------------------------------------------------------------
-            | Start transaction
+            | Create User
             |--------------------------------------------------------------------------
             */
 
-            $conn->begin_transaction();
-
-
-            try {
-
-
-                /*
-                |--------------------------------------------------------------------------
-                | Password Hash
-                |--------------------------------------------------------------------------
-                */
-
-                $passwordHash = password_hash(
+            $hashedPassword =
+                password_hash(
                     $password,
                     PASSWORD_DEFAULT
                 );
 
 
-                /*
-                |--------------------------------------------------------------------------
-                | User Role
-                |--------------------------------------------------------------------------
-                */
-
-                $role = $is_hod ? "HOD" : "FACULTY";
+            $role =
+                ($is_hod === 1)
+                ? "HOD"
+                : "FACULTY";
 
 
-                /*
-                |--------------------------------------------------------------------------
-                | Create User
-                |--------------------------------------------------------------------------
-                */
+            $status = "ACTIVE";
 
-                $stmt = $conn->prepare(
-                    "INSERT INTO users
-                    (
-                        username,
-                        password,
-                        role,
-                        status
-                    )
-                    VALUES
-                    (
-                        ?,
-                        ?,
-                        ?,
-                        'ACTIVE'
-                    )"
+
+            $sql = "
+                INSERT INTO users
+                (
+                    username,
+                    password,
+                    role,
+                    status
+                )
+                VALUES
+                (
+                    ?,
+                    ?,
+                    ?,
+                    ?
+                )
+            ";
+
+            $stmt = $conn->prepare($sql);
+
+            if (!$stmt) {
+
+                throw new Exception(
+                    "Failed to create user account."
                 );
-
-                $stmt->bind_param(
-                    "sss",
-                    $username,
-                    $passwordHash,
-                    $role
-                );
-
-                $stmt->execute();
-
-
-                $user_id = $conn->insert_id;
-
-
-                /*
-                |--------------------------------------------------------------------------
-                | Create Faculty
-                |--------------------------------------------------------------------------
-                */
-
-                $department_id = 1;
-
-
-                $stmt = $conn->prepare(
-                    "INSERT INTO faculty
-                    (
-                        user_id,
-                        faculty_code,
-                        faculty_name,
-                        email,
-                        phone,
-                        department_id,
-                        designation,
-                        is_hod
-                    )
-                    VALUES
-                    (
-                        ?,
-                        ?,
-                        ?,
-                        ?,
-                        ?,
-                        ?,
-                        ?,
-                        ?
-                    )"
-                );
-
-
-                $stmt->bind_param(
-                    "issssisi",
-                    $user_id,
-                    $faculty_code,
-                    $faculty_name,
-                    $email,
-                    $phone,
-                    $department_id,
-                    $designation,
-                    $is_hod
-                );
-
-
-                $stmt->execute();
-
-
-                /*
-                |--------------------------------------------------------------------------
-                | Commit
-                |--------------------------------------------------------------------------
-                */
-
-                $conn->commit();
-
-
-                $success =
-                    "Faculty member added successfully.";
-
-
-                /*
-                |--------------------------------------------------------------------------
-                | Clear form
-                |--------------------------------------------------------------------------
-                */
-
-                $_POST = [];
-
-
-            } catch (Exception $e) {
-
-                $conn->rollback();
-
-                $error =
-                    "Failed to add faculty: "
-                    . $e->getMessage();
             }
+
+
+            $stmt->bind_param(
+                "ssss",
+                $username,
+                $hashedPassword,
+                $role,
+                $status
+            );
+
+
+            if (!$stmt->execute()) {
+
+                $stmt->close();
+
+                throw new Exception(
+                    "Failed to create user account."
+                );
+            }
+
+
+            $user_id =
+                $stmt->insert_id;
+
+            $stmt->close();
+
+
+            /*
+            |--------------------------------------------------------------------------
+            | Create Faculty
+            |--------------------------------------------------------------------------
+            */
+
+            /*
+            | Department 1 = CSE
+            */
+
+            $department_id = 1;
+
+
+            $sql = "
+                INSERT INTO faculty
+                (
+                    user_id,
+                    faculty_code,
+                    faculty_name,
+                    email,
+                    phone,
+                    department_id,
+                    designation,
+                    is_hod
+                )
+                VALUES
+                (
+                    ?,
+                    ?,
+                    ?,
+                    ?,
+                    ?,
+                    ?,
+                    ?,
+                    ?
+                )
+            ";
+
+            $stmt = $conn->prepare($sql);
+
+            if (!$stmt) {
+
+                throw new Exception(
+                    "Failed to create faculty record."
+                );
+            }
+
+
+            $stmt->bind_param(
+                "issssisi",
+                $user_id,
+                $faculty_code,
+                $faculty_name,
+                $email,
+                $phone,
+                $department_id,
+                $designation,
+                $is_hod
+            );
+
+
+            if (!$stmt->execute()) {
+
+                $stmt->close();
+
+                throw new Exception(
+                    "Failed to create faculty record."
+                );
+            }
+
+
+            $stmt->close();
+
+
+            /*
+            |--------------------------------------------------------------------------
+            | Commit
+            |--------------------------------------------------------------------------
+            */
+
+            $conn->commit();
+
+
+            header(
+                "Location: faculty.php?success=added"
+            );
+
+            exit;
+
+        } catch (Throwable $e) {
+
+            $conn->rollback();
+
+            $error =
+                $e->getMessage();
         }
     }
 }
@@ -263,20 +392,37 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
 <?php require_once "../includes/sidebar.php"; ?>
 
+
 <main>
 
-    <h1>Add Faculty</h1>
+    <div class="page-header">
 
-    <p>
-        Create a new faculty member and login account.
-    </p>
+        <div>
 
-    <br>
+            <h1>
+                Add Faculty
+            </h1>
+
+            <p>
+                Create a new faculty account.
+            </p>
+
+        </div>
 
 
-    <?php if ($error): ?>
+        <a
+            href="faculty.php"
+            class="btn btn-secondary"
+        >
+            Back to Faculty
+        </a>
 
-        <div class="form-error">
+    </div>
+
+
+    <?php if ($error !== ""): ?>
+
+        <div class="alert alert-error">
 
             <?php
             echo htmlspecialchars($error);
@@ -287,205 +433,224 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
     <?php endif; ?>
 
 
-    <?php if ($success): ?>
+    <div class="form-container">
 
-        <div class="form-success">
-
-            <?php
-            echo htmlspecialchars($success);
-            ?>
-
-        </div>
-
-    <?php endif; ?>
-
-
-    <div class="table-container">
-
-        <form method="POST">
-
+        <form
+            method="POST"
+            action=""
+        >
 
             <!-- Faculty Code -->
 
-            <label>
-                Faculty Code *
-            </label>
+            <div class="form-group">
 
-            <input
-                type="text"
-                name="faculty_code"
-                placeholder="CSE016"
-                value="<?php
-                    echo htmlspecialchars(
-                        $_POST['faculty_code'] ?? ''
-                    );
-                ?>"
-                required
-            >
+                <label for="faculty_code">
+                    Faculty Code
+                </label>
 
-            <br><br>
+                <input
+                    type="text"
+                    id="faculty_code"
+                    name="faculty_code"
+                    value="<?php
+                        echo htmlspecialchars(
+                            $faculty_code
+                        );
+                    ?>"
+                    maxlength="20"
+                    required
+                >
+
+            </div>
 
 
             <!-- Faculty Name -->
 
-            <label>
-                Faculty Name *
-            </label>
+            <div class="form-group">
 
-            <input
-                type="text"
-                name="faculty_name"
-                placeholder="Prof. Example Kumar"
-                value="<?php
-                    echo htmlspecialchars(
-                        $_POST['faculty_name'] ?? ''
-                    );
-                ?>"
-                required
-            >
+                <label for="faculty_name">
+                    Faculty Name
+                </label>
 
-            <br><br>
+                <input
+                    type="text"
+                    id="faculty_name"
+                    name="faculty_name"
+                    value="<?php
+                        echo htmlspecialchars(
+                            $faculty_name
+                        );
+                    ?>"
+                    maxlength="100"
+                    required
+                >
+
+            </div>
 
 
             <!-- Username -->
 
-            <label>
-                Username *
-            </label>
+            <div class="form-group">
 
-            <input
-                type="text"
-                name="username"
-                placeholder="faculty15"
-                value="<?php
-                    echo htmlspecialchars(
-                        $_POST['username'] ?? ''
-                    );
-                ?>"
-                required
-            >
+                <label for="username">
+                    Username
+                </label>
 
-            <br><br>
+                <input
+                    type="text"
+                    id="username"
+                    name="username"
+                    value="<?php
+                        echo htmlspecialchars(
+                            $username
+                        );
+                    ?>"
+                    maxlength="50"
+                    required
+                >
+
+            </div>
 
 
             <!-- Password -->
 
-            <label>
-                Password *
-            </label>
+            <div class="form-group">
 
-            <input
-                type="password"
-                name="password"
-                required
-            >
+                <label for="password">
+                    Password
+                </label>
 
-            <br><br>
+                <input
+                    type="password"
+                    id="password"
+                    name="password"
+                    minlength="6"
+                    required
+                >
+
+            </div>
 
 
             <!-- Email -->
 
-            <label>
-                Email
-            </label>
+            <div class="form-group">
 
-            <input
-                type="email"
-                name="email"
-                placeholder="faculty@example.com"
-                value="<?php
-                    echo htmlspecialchars(
-                        $_POST['email'] ?? ''
-                    );
-                ?>"
-            >
+                <label for="email">
+                    Email
+                </label>
 
-            <br><br>
+                <input
+                    type="email"
+                    id="email"
+                    name="email"
+                    value="<?php
+                        echo htmlspecialchars(
+                            $email
+                        );
+                    ?>"
+                    maxlength="100"
+                >
+
+            </div>
 
 
             <!-- Phone -->
 
-            <label>
-                Phone
-            </label>
+            <div class="form-group">
 
-            <input
-                type="text"
-                name="phone"
-                placeholder="9876543210"
-                value="<?php
-                    echo htmlspecialchars(
-                        $_POST['phone'] ?? ''
-                    );
-                ?>"
-            >
+                <label for="phone">
+                    Phone
+                </label>
 
-            <br><br>
+                <input
+                    type="text"
+                    id="phone"
+                    name="phone"
+                    value="<?php
+                        echo htmlspecialchars(
+                            $phone
+                        );
+                    ?>"
+                    maxlength="20"
+                >
+
+            </div>
 
 
             <!-- Designation -->
 
-            <label>
-                Designation
-            </label>
+            <div class="form-group">
 
-            <input
-                type="text"
-                name="designation"
-                placeholder="Assistant Professor"
-                value="<?php
-                    echo htmlspecialchars(
-                        $_POST['designation'] ?? ''
-                    );
-                ?>"
-            >
+                <label for="designation">
+                    Designation
+                </label>
 
-            <br><br>
+                <input
+                    type="text"
+                    id="designation"
+                    name="designation"
+                    value="<?php
+                        echo htmlspecialchars(
+                            $designation
+                        );
+                    ?>"
+                    maxlength="50"
+                    required
+                >
+
+            </div>
 
 
             <!-- HOD -->
 
-            <label>
+            <div class="form-group">
 
-                <input
-                    type="checkbox"
-                    name="is_hod"
-                    value="1"
-                    <?php
-                    echo isset($_POST['is_hod'])
-                        ? 'checked'
-                        : '';
-                    ?>
+                <label>
+
+                    <input
+                        type="checkbox"
+                        name="is_hod"
+                        value="1"
+                        <?php
+                        if ($is_hod === 1) {
+                            echo "checked";
+                        }
+                        ?>
+                    >
+
+                    Is HOD
+
+                </label>
+
+            </div>
+
+
+            <!-- Buttons -->
+
+            <div class="form-actions">
+
+                <button
+                    type="submit"
+                    class="btn btn-primary"
                 >
-
-                HOD
-
-            </label>
-
-            <br><br>
+                    Add Faculty
+                </button>
 
 
-            <!-- Submit -->
+                <a
+                    href="faculty.php"
+                    class="btn btn-secondary"
+                >
+                    Cancel
+                </a>
 
-            <button
-                type="submit"
-                class="btn btn-success"
-            >
-                Add Faculty
-            </button>
-
-
-            <a
-                href="faculty.php"
-                class="btn"
-            >
-                Cancel
-            </a>
+            </div>
 
         </form>
 
     </div>
 
 </main>
+
 
 <?php require_once "../includes/footer.php"; ?>

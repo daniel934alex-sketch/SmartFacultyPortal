@@ -1,18 +1,32 @@
+/* =========================================================
+   GLOBAL RESET
+   ========================================================= */
+
 * {
     margin: 0;
     padding: 0;
     box-sizing: border-box;
 }
 
+
+/* =========================================================
+   BODY
+   ========================================================= */
+
 body {
     font-family: Arial, sans-serif;
     background: #f4f6f9;
+    color: #1e293b;
 }
 
-/* Navbar */
+
+/* =========================================================
+   NAVBAR
+   ========================================================= */
 
 .navbar {
     height: 60px;
+
     background: #1e293b;
     color: white;
 
@@ -23,6 +37,7 @@ body {
     padding: 0 25px;
 
     position: fixed;
+
     top: 0;
     left: 0;
     right: 0;
@@ -42,21 +57,34 @@ body {
 
 .role-badge {
     background: #2563eb;
+
     padding: 5px 10px;
+
     border-radius: 5px;
+
+    color: white;
 }
 
 .logout-btn {
     color: white;
+
     text-decoration: none;
 
     background: #dc2626;
 
     padding: 7px 12px;
+
     border-radius: 5px;
 }
 
-/* Sidebar */
+.logout-btn:hover {
+    background: #b91c1c;
+}
+
+
+/* =========================================================
+   SIDEBAR
+   ========================================================= */
 
 .sidebar {
     width: 230px;
@@ -70,6 +98,10 @@ body {
     background: #0f172a;
 
     padding-top: 20px;
+
+    overflow-y: auto;
+
+    z-index: 900;
 }
 
 .sidebar h2 {
@@ -92,18 +124,80 @@ body {
 
 .sidebar a:hover {
     background: #1e293b;
+
     color: white;
 }
 
-/* Main */
 
-main {
+/* =========================================================
+   MAIN CONTENT
+   IMPORTANT:
+   Both <main> and <div class="main-content">
+   must have the same layout.
+   ========================================================= */
+
+main,
+.main-content {
     margin-left: 230px;
 
     padding: 90px 30px 30px;
+
+    min-height: 100vh;
+
+    width: auto;
+
+    box-sizing: border-box;
 }
 
-/* Dashboard */
+
+/* =========================================================
+   PAGE HEADER
+   ========================================================= */
+
+.page-header {
+    display: flex;
+
+    justify-content: space-between;
+
+    align-items: center;
+
+    width: 100%;
+
+    padding: 20px 25px;
+
+    margin-bottom: 20px;
+
+    background: #ffffff;
+
+    border-radius: 10px;
+
+    box-sizing: border-box;
+
+    gap: 20px;
+}
+
+.page-header h2 {
+    margin: 0 0 5px 0;
+
+    color: #1e293b;
+
+    font-size: 24px;
+}
+
+.page-header p {
+    margin: 0;
+
+    color: #64748b;
+}
+
+.page-header .btn {
+    flex-shrink: 0;
+}
+
+
+/* =========================================================
+   DASHBOARD
+   ========================================================= */
 
 .dashboard-title {
     margin-bottom: 25px;
@@ -145,7 +239,10 @@ main {
     color: #1e293b;
 }
 
-/* Tables */
+
+/* =========================================================
+   TABLES
+   ========================================================= */
 
 .table-container {
     background: white;
@@ -178,7 +275,10 @@ th {
     background: #f8fafc;
 }
 
-/* Buttons */
+
+/* =========================================================
+   BUTTONS
+   ========================================================= */
 
 .btn {
     display: inline-block;
@@ -192,22 +292,54 @@ th {
     text-decoration: none;
 
     cursor: pointer;
+
+    font-size: 14px;
 }
 
 .btn-primary {
     background: #2563eb;
+
     color: white;
+}
+
+.btn-primary:hover {
+    background: #1d4ed8;
 }
 
 .btn-danger {
     background: #dc2626;
+
     color: white;
+}
+
+.btn-danger:hover {
+    background: #b91c1c;
 }
 
 .btn-success {
     background: #16a34a;
+
     color: white;
 }
+
+.btn-success:hover {
+    background: #15803d;
+}
+
+.btn-secondary {
+    background: #64748b;
+
+    color: white;
+}
+
+.btn-secondary:hover {
+    background: #475569;
+}
+
+
+/* =========================================================
+   FORMS
+   ========================================================= */
 
 form {
     max-width: 700px;
@@ -223,7 +355,10 @@ form label {
 
 form input[type="text"],
 form input[type="email"],
-form input[type="password"] {
+form input[type="password"],
+form input[type="number"],
+form select,
+form textarea {
     width: 100%;
 
     padding: 10px;
@@ -233,7 +368,38 @@ form input[type="password"] {
     border-radius: 5px;
 
     font-size: 15px;
+
+    background: white;
+
+    box-sizing: border-box;
 }
+
+form select {
+    cursor: pointer;
+}
+
+form textarea {
+    min-height: 100px;
+
+    resize: vertical;
+}
+
+.form-group {
+    margin-bottom: 18px;
+}
+
+.form-actions {
+    display: flex;
+
+    gap: 10px;
+
+    margin-top: 20px;
+}
+
+
+/* =========================================================
+   FORM MESSAGES
+   ========================================================= */
 
 .form-error {
     background: #fee2e2;
@@ -257,4 +423,229 @@ form input[type="password"] {
     margin-bottom: 20px;
 
     border-radius: 5px;
+}
+
+.alert {
+    padding: 12px 15px;
+
+    margin-bottom: 20px;
+
+    border-radius: 6px;
+}
+
+.alert-danger {
+    background: #fee2e2;
+
+    color: #991b1b;
+}
+
+.alert-success {
+    background: #dcfce7;
+
+    color: #166534;
+}
+
+
+/* =========================================================
+   STATUS
+   ========================================================= */
+
+.status-active {
+    display: inline-block;
+
+    background: #dcfce7;
+
+    color: #166534;
+
+    padding: 5px 10px;
+
+    border-radius: 5px;
+
+    font-size: 12px;
+
+    font-weight: 600;
+}
+
+.status-inactive {
+    display: inline-block;
+
+    background: #fee2e2;
+
+    color: #991b1b;
+
+    padding: 5px 10px;
+
+    border-radius: 5px;
+
+    font-size: 12px;
+
+    font-weight: 600;
+}
+
+
+/* =========================================================
+   ROLE BADGE
+   ========================================================= */
+
+.table-container .role-badge {
+    display: inline-block;
+
+    background: #eff6ff;
+
+    color: #2563eb;
+
+    padding: 5px 10px;
+
+    border-radius: 5px;
+
+    font-size: 13px;
+
+    font-weight: 600;
+}
+
+
+/* =========================================================
+   TABLE BUTTONS
+   ========================================================= */
+
+.table-container .btn {
+    margin: 2px;
+
+    font-size: 13px;
+}
+
+
+/* =========================================================
+   FORM CONTAINER
+   ========================================================= */
+
+.form-container {
+    background: white;
+
+    padding: 25px;
+
+    border-radius: 10px;
+
+    max-width: 800px;
+
+    box-sizing: border-box;
+}
+
+
+/* =========================================================
+   RESPONSIVE
+   ========================================================= */
+
+@media (max-width: 900px) {
+
+    .sidebar {
+        width: 200px;
+    }
+
+    main,
+    .main-content {
+        margin-left: 200px;
+
+        padding-left: 20px;
+        padding-right: 20px;
+    }
+
+    .page-header {
+        flex-direction: column;
+
+        align-items: flex-start;
+    }
+
+}
+
+
+@media (max-width: 650px) {
+
+    .navbar-left {
+        font-size: 16px;
+    }
+
+    .navbar-right {
+        gap: 7px;
+    }
+
+    .navbar-right span:first-child {
+        display: none;
+    }
+
+    .sidebar {
+        width: 180px;
+    }
+
+    main,
+    .main-content {
+        margin-left: 180px;
+
+        padding-left: 15px;
+        padding-right: 15px;
+    }
+
+    .page-header {
+        padding: 18px;
+    }
+
+}
+
+/* =========================================================
+   ANNOUNCEMENT / FORM CARD
+   ========================================================= */
+
+.form-card {
+    background: white;
+
+    padding: 25px;
+
+    border-radius: 10px;
+
+    max-width: 900px;
+
+    box-shadow:
+        0 2px 8px rgba(0, 0, 0, 0.08);
+
+    box-sizing: border-box;
+}
+
+
+/* =========================================================
+   ALERT ERROR
+   ========================================================= */
+
+.alert-error {
+    background: #fee2e2;
+
+    color: #991b1b;
+
+    padding: 12px 15px;
+
+    margin-bottom: 20px;
+
+    border-radius: 6px;
+}
+
+.form-card {
+    background: white;
+    padding: 25px;
+    border-radius: 10px;
+    max-width: 900px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    box-sizing: border-box;
+}
+
+.alert-error {
+    background: #fee2e2;
+    color: #991b1b;
+    padding: 12px 15px;
+    margin-bottom: 20px;
+    border-radius: 6px;
+}
+
+.page-header h1 {
+    margin: 0 0 5px 0;
+    color: #1e293b;
+    font-size: 24px;
 }

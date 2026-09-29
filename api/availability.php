@@ -4,13 +4,12 @@ session_start();
 
 header("Content-Type: application/json");
 
-// Database
 require_once "../config/database.php";
 
 
-// ========================================
-// 1. CHECK LOGIN
-// ========================================
+/* =========================================================
+   CHECK LOGIN
+   ========================================================= */
 
 if (!isset($_SESSION['user_id'])) {
 
@@ -23,11 +22,14 @@ if (!isset($_SESSION['user_id'])) {
 }
 
 
-// ========================================
-// 2. CHECK FACULTY ROLE
-// ========================================
+/* =========================================================
+   CHECK ROLE
+   ========================================================= */
 
-if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'FACULTY') {
+if (
+    !isset($_SESSION['role']) ||
+    $_SESSION['role'] !== 'FACULTY'
+) {
 
     echo json_encode([
         "success" => false,
@@ -38,28 +40,40 @@ if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'FACULTY') {
 }
 
 
-// ========================================
-// 3. GET LOGGED-IN USER
-// ========================================
+/* =========================================================
+   GET USER ID
+   ========================================================= */
 
-$user_id = (int) $_SESSION['user_id'];
-
-
-// ========================================
-// 4. GET FORM DATA
-// ========================================
-
-$date = trim($_POST['date'] ?? '');
-$period_id = trim($_POST['period_id'] ?? '');
-$status = trim($_POST['status'] ?? '');
-$reason = trim($_POST['reason'] ?? '');
+$user_id =
+    (int) $_SESSION['user_id'];
 
 
-// ========================================
-// 5. VALIDATE DATA
-// ========================================
+/* =========================================================
+   GET FORM DATA
+   ========================================================= */
 
-if ($date === '' || $period_id === '' || $status === '') {
+$date =
+    trim($_POST['date'] ?? '');
+
+$period_id =
+    trim($_POST['period_id'] ?? '');
+
+$status =
+    trim($_POST['status'] ?? '');
+
+$reason =
+    trim($_POST['reason'] ?? '');
+
+
+/* =========================================================
+   VALIDATE INPUT
+   ========================================================= */
+
+if (
+    $date === '' ||
+    $period_id === '' ||
+    $status === ''
+) {
 
     echo json_encode([
         "success" => false,
@@ -70,9 +84,9 @@ if ($date === '' || $period_id === '' || $status === '') {
 }
 
 
-// ========================================
-// 6. VALIDATE STATUS
-// ========================================
+/* =========================================================
+   VALIDATE STATUS
+   ========================================================= */
 
 $allowed_status = [
     "AVAILABLE",
@@ -80,7 +94,14 @@ $allowed_status = [
     "LEAVE"
 ];
 
-if (!in_array($status, $allowed_status, true)) {
+
+if (
+    !in_array(
+        $status,
+        $allowed_status,
+        true
+    )
+) {
 
     echo json_encode([
         "success" => false,
@@ -91,11 +112,14 @@ if (!in_array($status, $allowed_status, true)) {
 }
 
 
-// ========================================
-// 7. REASON REQUIRED FOR CAN'T GO
-// ========================================
+/* =========================================================
+   REASON REQUIRED FOR UNAVAILABLE
+   ========================================================= */
 
-if ($status === "UNAVAILABLE" && $reason === '') {
+if (
+    $status === "UNAVAILABLE" &&
+    $reason === ''
+) {
 
     echo json_encode([
         "success" => false,
@@ -106,9 +130,9 @@ if ($status === "UNAVAILABLE" && $reason === '') {
 }
 
 
-// ========================================
-// 8. GET FACULTY ID
-// ========================================
+/* =========================================================
+   FIND FACULTY ID
+   ========================================================= */
 
 $stmt = $conn->prepare("
     SELECT faculty_id
@@ -117,46 +141,63 @@ $stmt = $conn->prepare("
     LIMIT 1
 ");
 
+
 if (!$stmt) {
 
     echo json_encode([
         "success" => false,
-        "message" => "Faculty query preparation failed: " . $conn->error
+        "message" =>
+            "Faculty query preparation failed: " .
+            $conn->error
     ]);
 
     exit;
 }
 
-$stmt->bind_param("i", $user_id);
+
+$stmt->bind_param(
+    "i",
+    $user_id
+);
+
 
 $stmt->execute();
 
-$result = $stmt->get_result();
+
+$result =
+    $stmt->get_result();
 
 
-// Faculty not found
-if ($result->num_rows === 0) {
+if (
+    $result->num_rows === 0
+) {
 
     echo json_encode([
         "success" => false,
-        "message" => "Faculty record not found for this login."
+        "message" =>
+            "Faculty record not found for this login."
     ]);
 
     $stmt->close();
+
     exit;
 }
 
 
-$faculty = $result->fetch_assoc();
+$faculty =
+    $result->fetch_assoc();
 
-$faculty_id = (int) $faculty['faculty_id'];
+
+$faculty_id =
+    (int) $faculty['faculty_id'];
+
 
 $stmt->close();
 
 
-// ========================================
-// 9. SAVE AVAILABILITY
-// ========================================
+/* =========================================================
+   SAVE AVAILABILITY
+   ========================================================= */
 
 $stmt = $conn->prepare("
     INSERT INTO faculty_availability
@@ -167,23 +208,41 @@ $stmt = $conn->prepare("
         status,
         reason
     )
-    VALUES (?, ?, ?, ?, ?)
+    VALUES
+    (
+        ?,
+        ?,
+        ?,
+        ?,
+        ?
+    )
     ON DUPLICATE KEY UPDATE
         status = VALUES(status),
         reason = VALUES(reason),
         updated_at = CURRENT_TIMESTAMP
 ");
 
+
 if (!$stmt) {
 
     echo json_encode([
         "success" => false,
-        "message" => "Save query preparation failed: " . $conn->error
+        "message" =>
+            "Save query preparation failed: " .
+            $conn->error
     ]);
 
     exit;
 }
 
+
+/*
+ * i = faculty_id
+ * s = date
+ * i = period_id
+ * s = status
+ * s = reason
+ */
 
 $stmt->bind_param(
     "isiss",
@@ -195,27 +254,35 @@ $stmt->bind_param(
 );
 
 
-// ========================================
-// 10. EXECUTE
-// ========================================
+/* =========================================================
+   EXECUTE
+   ========================================================= */
 
 if ($stmt->execute()) {
 
     echo json_encode([
         "success" => true,
-        "message" => "Period " . $period_id . " - " . $status . " saved successfully."
+        "message" =>
+            "Period " .
+            $period_id .
+            " - " .
+            $status .
+            " saved successfully."
     ]);
 
 } else {
 
     echo json_encode([
         "success" => false,
-        "message" => "Database save failed: " . $stmt->error
+        "message" =>
+            "Database save failed: " .
+            $stmt->error
     ]);
 }
 
 
 $stmt->close();
+
 $conn->close();
 
 ?>

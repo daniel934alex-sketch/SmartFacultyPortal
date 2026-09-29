@@ -1049,3 +1049,21 @@ VALUES
  11,
  '2026-09-12',
  'Saturday EE Project');
+
+
+
+ 
+CREATE TABLE IF NOT EXISTS faculty_availability (
+    availability_id INT AUTO_INCREMENT PRIMARY KEY,
+    faculty_id INT NOT NULL,
+    status VARCHAR(30) NOT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        ON UPDATE CURRENT_TIMESTAMP
+);
+
+
+
+
+ALTER TABLE notifications
+ADD COLUMN response VARCHAR(30) NULL
+AFTER notification_type;

@@ -1,53 +1,149 @@
+<?php
+
+/*
+|--------------------------------------------------------------------------
+| Sidebar
+|--------------------------------------------------------------------------
+|
+| This sidebar is used by the HOD/Admin portal.
+|
+*/
+
+?>
+
 <aside class="sidebar">
 
-    <h2>HOD Panel</h2>
+    <div class="sidebar-menu">
 
-    <a href="dashboard.php">
-        Dashboard
-    </a>
+        <!-- Dashboard -->
 
-    <a href="faculty.php">
-        Faculty
-    </a>
+        <a
+            href="../admin/dashboard.php"
+            class="sidebar-link"
+        >
+            Dashboard
+        </a>
 
-    <a href="students.php">
-        Students
-    </a>
 
-    <a href="departments.php">
-        Departments
-    </a>
+        <!-- Faculty -->
 
-    <a href="subjects.php">
-        Subjects
-    </a>
+        <a
+            href="../admin/faculty.php"
+            class="sidebar-link"
+        >
+            Faculty
+        </a>
 
-    <a href="classrooms.php">
-        Classrooms
-    </a>
 
-    <a href="timetable.php">
-        Timetable
-    </a>
+        <!-- Faculty Workload -->
 
-    <a href="handovers.php">
-        Handovers
-    </a>
+        <a
+            href="../admin/faculty-workload.php"
+            class="sidebar-link"
+        >
+            Faculty Workload
+        </a>
 
-    <a href="attendance.php">
-        Attendance
-    </a>
 
-    <a href="announcements.php">
-        Announcements
-    </a>
+        <!-- Students -->
 
-    <a href="projects.php">
-        EE Projects
-    </a>
+        <a
+            href="../admin/students.php"
+            class="sidebar-link"
+        >
+            Students
+        </a>
 
-    <a href="reports.php">
-        Reports
-    </a>
+
+        <!-- Departments -->
+
+        <a
+            href="../admin/departments.php"
+            class="sidebar-link"
+        >
+            Departments
+        </a>
+
+
+        <!-- Subjects -->
+
+        <a
+            href="../admin/subjects.php"
+            class="sidebar-link"
+        >
+            Subjects
+        </a>
+
+
+        <!-- Classrooms -->
+
+        <a
+            href="../admin/classrooms.php"
+            class="sidebar-link"
+        >
+            Classrooms
+        </a>
+
+
+        <!-- Timetable -->
+
+        <a
+            href="../admin/timetable.php"
+            class="sidebar-link"
+        >
+            Timetable
+        </a>
+
+
+        <!-- Handovers -->
+
+        <a
+            href="../admin/handovers.php"
+            class="sidebar-link"
+        >
+            Handovers
+        </a>
+
+
+        <!-- Attendance -->
+
+        <a
+            href="../admin/attendance.php"
+            class="sidebar-link"
+        >
+            Attendance
+        </a>
+
+
+        <!-- Announcements -->
+
+        <a
+            href="../admin/announcements.php"
+            class="sidebar-link"
+        >
+            Announcements
+        </a>
+
+
+        <!-- EE Projects -->
+
+        <a
+            href="../admin/projects.php"
+            class="sidebar-link"
+        >
+            EE Projects
+        </a>
+
+
+        <!-- Reports -->
+
+        <a
+            href="../admin/reports.php"
+            class="sidebar-link"
+        >
+            Reports
+        </a>
+
+    </div>
 
 </aside>

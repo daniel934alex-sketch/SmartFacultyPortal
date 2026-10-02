@@ -1,4 +1,5 @@
 <?php
+
 require_once "../includes/auth-check.php";
 require_once "../includes/role-check.php";
 requireRole('FACULTY');
@@ -7,51 +8,18 @@ require_once "../config/database.php";
 
 $user_id = $_SESSION['user_id'];
 
-/* Handle faculty response */
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+/*
+|--------------------------------------------------------------------------
+| Get Faculty Notifications
+|--------------------------------------------------------------------------
+*/
 
-    $notification_id = intval($_POST['notification_id'] ?? 0);
-    $response = $_POST['response'] ?? '';
-
-    $allowed_responses = [
-        'I CAN ATTEND',
-        "I CAN'T GO",
-        'LEAVE'
-    ];
-
-    if (
-        $notification_id > 0 &&
-        in_array($response, $allowed_responses, true)
-    ) {
-
-        $update_sql = "
-            UPDATE notifications
-            SET response = ?
-            WHERE notification_id = ?
-            AND user_id = ?
-        ";
-
-        $update_stmt = $conn->prepare($update_sql);
-        $update_stmt->bind_param(
-            "sii",
-            $response,
-            $notification_id,
-            $user_id
-        );
-
-        $update_stmt->execute();
-        $update_stmt->close();
-    }
-}
-
-/* Get notifications */
 $sql = "
     SELECT
         notification_id,
         title,
         message,
         notification_type,
-        response,
         is_read,
         created_at
     FROM notifications
@@ -60,17 +28,25 @@ $sql = "
 ";
 
 $stmt = $conn->prepare($sql);
+
+if (!$stmt) {
+    die("Database error: " . $conn->error);
+}
+
 $stmt->bind_param("i", $user_id);
 $stmt->execute();
 
 $result = $stmt->get_result();
+
 ?>
 
 <!DOCTYPE html>
 <html lang="en">
 
 <head>
+
     <meta charset="UTF-8">
+
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
     <title>Faculty Notifications</title>
@@ -78,159 +54,203 @@ $result = $stmt->get_result();
     <link rel="stylesheet" href="../assets/css/style.css">
 
     <style>
+
+        body {
+            font-family: Arial, sans-serif;
+            padding: 30px;
+            background: #f5f7fb;
+        }
+
+        h1 {
+            margin-bottom: 5px;
+        }
+
+        .welcome {
+            color: #555;
+            margin-bottom: 25px;
+        }
+
         .notification {
-            border: 1px solid #ccc;
-            padding: 15px;
+            background: white;
+            border: 1px solid #ddd;
+            padding: 20px;
+            margin-bottom: 15px;
+            border-radius: 10px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+        }
+
+        .notification.new {
+            border-left: 5px solid #0d6efd;
+        }
+
+        .notification h3 {
+            margin-top: 0;
+            margin-bottom: 10px;
+        }
+
+        .notification p {
             margin: 10px 0;
-            border-radius: 8px;
-            background: #e8f1ff;
+            line-height: 1.5;
         }
 
-        .response-buttons {
-            margin-top: 15px;
+        .notification-info {
+            color: #666;
+            font-size: 13px;
+            margin-top: 10px;
         }
 
-        .response-buttons button {
-            padding: 10px 15px;
-            margin: 5px;
-            border: none;
-            border-radius: 6px;
-            cursor: pointer;
+        .new-badge {
+            display: inline-block;
+            background: #0d6efd;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 5px;
+            font-size: 12px;
             font-weight: bold;
+            margin-left: 8px;
         }
 
-        .attend {
+        .handover-button {
+            display: inline-block;
+            margin-top: 15px;
+            padding: 10px 16px;
             background: #198754;
             color: white;
-        }
-
-        .cannot {
-            background: #dc3545;
-            color: white;
-        }
-
-        .leave {
-            background: #ffc107;
-            color: black;
-        }
-
-        .saved-response {
-            margin-top: 15px;
+            text-decoration: none;
+            border-radius: 6px;
             font-weight: bold;
         }
+
+        .handover-button:hover {
+            background: #146c43;
+        }
+
+        .empty {
+            background: white;
+            padding: 25px;
+            border-radius: 10px;
+            text-align: center;
+            color: #666;
+        }
+
+        .back-button {
+            display: inline-block;
+            margin-top: 20px;
+            padding: 10px 15px;
+            background: #6c757d;
+            color: white;
+            text-decoration: none;
+            border-radius: 6px;
+        }
+
+        .back-button:hover {
+            background: #5c636a;
+        }
+
     </style>
 
 </head>
 
 <body>
 
-<h1>My Notifications</h1>
+    <h1>My Notifications</h1>
 
-<p>
-    Welcome,
-    <?= htmlspecialchars($_SESSION['username']) ?>
-</p>
-
-<?php if ($result->num_rows === 0): ?>
-
-    <p>No notifications available.</p>
-
-<?php else: ?>
-
-    <?php while ($notification = $result->fetch_assoc()): ?>
-
-        <div class="notification">
-
-            <h3>
-                <?= htmlspecialchars($notification['title']) ?>
-            </h3>
-
-            <p>
-                <?= htmlspecialchars($notification['message']) ?>
-            </p>
-
-            <small>
-                Type:
-                <?= htmlspecialchars(
-                    $notification['notification_type'] ?? 'General'
-                ) ?>
-
-                |
-
-                <?= htmlspecialchars($notification['created_at']) ?>
-            </small>
-
-            <?php if (!$notification['is_read']): ?>
-
-                <strong style="color: blue;">
-                    NEW
-                </strong>
-
-            <?php endif; ?>
+    <div class="welcome">
+        Welcome,
+        <strong>
+            <?= htmlspecialchars($_SESSION['username']) ?>
+        </strong>
+    </div>
 
 
-            <!-- Response section -->
+    <?php if ($result->num_rows === 0): ?>
 
-            <?php if (empty($notification['response'])): ?>
-
-                <form method="POST" class="response-buttons">
-
-                    <input
-                        type="hidden"
-                        name="notification_id"
-                        value="<?= $notification['notification_id'] ?>"
-                    >
-
-                    <button
-                        type="submit"
-                        name="response"
-                        value="I CAN ATTEND"
-                        class="attend"
-                    >
-                        ✓ I CAN ATTEND
-                    </button>
-
-                    <button
-                        type="submit"
-                        name="response"
-                        value="I CAN'T GO"
-                        class="cannot"
-                    >
-                        ✕ I CAN'T GO
-                    </button>
-
-                    <button
-                        type="submit"
-                        name="response"
-                        value="LEAVE"
-                        class="leave"
-                    >
-                        🏖 LEAVE
-                    </button>
-
-                </form>
-
-            <?php else: ?>
-
-                <div class="saved-response">
-                    Your response:
-                    <?= htmlspecialchars($notification['response']) ?>
-                </div>
-
-            <?php endif; ?>
-
+        <div class="empty">
+            No notifications available.
         </div>
 
-    <?php endwhile; ?>
+    <?php else: ?>
 
-<?php endif; ?>
+        <?php while ($notification = $result->fetch_assoc()): ?>
 
-<br>
+            <div class="notification <?= !$notification['is_read'] ? 'new' : '' ?>">
 
-<a href="dashboard.php">
-    ← Back to Dashboard
-</a>
+                <h3>
+
+                    <?= htmlspecialchars($notification['title']) ?>
+
+                    <?php if (!$notification['is_read']): ?>
+
+                        <span class="new-badge">
+                            NEW
+                        </span>
+
+                    <?php endif; ?>
+
+                </h3>
+
+
+                <p>
+                    <?= htmlspecialchars($notification['message']) ?>
+                </p>
+
+
+                <div class="notification-info">
+
+                    Type:
+                    <?= htmlspecialchars(
+                        $notification['notification_type'] ?? 'General'
+                    ) ?>
+
+                    <br>
+
+                    Date:
+                    <?= htmlspecialchars($notification['created_at']) ?>
+
+                </div>
+
+
+                <?php
+                /*
+                 * Handover requests are handled from requests.php.
+                 * The notification only informs the faculty.
+                 */
+
+                if (
+                    isset($notification['notification_type']) &&
+                    strtoupper($notification['notification_type']) === 'HANDOVER'
+                ):
+                ?>
+
+                    <a
+                        href="requests.php"
+                        class="handover-button"
+                    >
+                        View Handover Request
+                    </a>
+
+                <?php endif; ?>
+
+            </div>
+
+        <?php endwhile; ?>
+
+    <?php endif; ?>
+
+
+    <a
+        href="dashboard.php"
+        class="back-button"
+    >
+        ← Back to Dashboard
+    </a>
 
 </body>
 
 </html>
+
+<?php
+
+$stmt->close();
+
+?>

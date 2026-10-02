@@ -1,8 +1,10 @@
 <?php
+
 require_once "../includes/auth-check.php";
 require_once "../includes/role-check.php";
 
 requireRole('FACULTY');
+
 ?>
 
 <!DOCTYPE html>
@@ -12,11 +14,17 @@ requireRole('FACULTY');
 
     <meta charset="UTF-8">
 
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
 
     <title>Faculty Dashboard</title>
 
-    <link rel="stylesheet" href="../assets/css/style.css">
+    <link
+        rel="stylesheet"
+        href="../assets/css/style.css"
+    >
 
     <style>
 
@@ -152,12 +160,22 @@ requireRole('FACULTY');
             📢 Faculty Availability
         </a>
 
+
+        <!-- Handover Requests -->
+
+        <a href="requests.php">
+            🔄 Handover Requests
+        </a>
+
     </div>
 
 
     <!-- Logout -->
 
-    <a class="logout" href="../auth/logout.php">
+    <a
+        class="logout"
+        href="../auth/logout.php"
+    >
         🚪 Logout
     </a>
 

@@ -1,126 +1,15 @@
 <?php
-require_once "../includes/auth-check.php";
-require_once "../includes/role-check.php";
-require_once "../config/database.php";
 
-requireRole('FACULTY');
+session_start();
 
-$user_id = $_SESSION['user_id'];
-$message = "";
-
-/*
- * Find faculty_id using the logged-in user_id
- */
-$stmt = $conn->prepare("
-    SELECT faculty_id
-    FROM faculty
-    WHERE user_id = ?
-");
-
-$stmt->bind_param("i", $user_id);
-$stmt->execute();
-
-$result = $stmt->get_result();
-$faculty = $result->fetch_assoc();
-
-if (!$faculty) {
-    die("Faculty record not found.");
+if (!isset($_SESSION['user_id'])) {
+    header("Location: ../auth/login.php");
+    exit;
 }
 
-$faculty_id = $faculty['faculty_id'];
-
-
-/*
- * Handle availability submission
- */
-if ($_SERVER["REQUEST_METHOD"] === "POST") {
-
-    $status = $_POST['status'] ?? '';
-
-    $allowed_statuses = [
-        'I CAN ATTEND',
-        "I CAN'T GO",
-        'LEAVE'
-    ];
-
-    if (!in_array($status, $allowed_statuses, true)) {
-
-        $message = "Invalid availability status.";
-
-    } else {
-
-        /*
-         * Check whether this faculty already has
-         * an availability record.
-         */
-        $check = $conn->prepare("
-            SELECT availability_id
-            FROM faculty_availability
-            WHERE faculty_id = ?
-            LIMIT 1
-        ");
-
-        $check->bind_param("i", $faculty_id);
-        $check->execute();
-
-        $existing = $check->get_result()->fetch_assoc();
-
-        if ($existing) {
-
-            /*
-             * Update existing availability
-             */
-            $update = $conn->prepare("
-                UPDATE faculty_availability
-                SET status = ?
-                WHERE faculty_id = ?
-            ");
-
-            $update->bind_param("si", $status, $faculty_id);
-            $update->execute();
-
-            $message = "Availability updated successfully.";
-
-        } else {
-
-            /*
-             * Insert first availability record
-             */
-            $insert = $conn->prepare("
-                INSERT INTO faculty_availability
-                (faculty_id, status)
-                VALUES (?, ?)
-            ");
-
-            $insert->bind_param("is", $faculty_id, $status);
-            $insert->execute();
-
-            $message = "Availability saved successfully.";
-        }
-    }
-}
-
-
-/*
- * Get current availability
- */
-$current_status = "Not Set";
-
-$current = $conn->prepare("
-    SELECT status
-    FROM faculty_availability
-    WHERE faculty_id = ?
-    LIMIT 1
-");
-
-$current->bind_param("i", $faculty_id);
-$current->execute();
-
-$current_result = $current->get_result();
-$current_data = $current_result->fetch_assoc();
-
-if ($current_data) {
-    $current_status = $current_data['status'];
+if (!isset($_SESSION['role']) || strtoupper($_SESSION['role']) !== 'FACULTY') {
+    header("Location: ../auth/login.php");
+    exit;
 }
 
 ?>
@@ -132,205 +21,1870 @@ if ($current_data) {
 
     <meta charset="UTF-8">
 
-    <meta name="viewport"
-          content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
     <title>Faculty Availability</title>
 
     <style>
 
+        * {
+            box-sizing: border-box;
+        }
+
         body {
+            margin: 0;
+            padding: 0;
             font-family: Arial, sans-serif;
             background: #f4f6f9;
-            margin: 0;
-            padding: 20px;
         }
 
         .container {
-            max-width: 700px;
-            margin: 50px auto;
+            width: 80%;
+            max-width: 1000px;
+            margin: 40px auto;
             background: white;
             padding: 30px;
-            border-radius: 12px;
-            box-shadow: 0 3px 10px rgba(0,0,0,0.1);
-            text-align: center;
+            border-radius: 10px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
         }
 
         h1 {
-            margin-bottom: 10px;
+            margin-top: 0;
+            color: #222;
         }
 
-        .welcome {
+        .description {
             color: #555;
             margin-bottom: 25px;
         }
 
-        .current-status {
-            background: #f8f9fa;
-            padding: 18px;
-            border-radius: 10px;
+        .date-section {
             margin-bottom: 25px;
         }
 
-        .current-status strong {
-            font-size: 18px;
+        .date-section label {
+            font-weight: bold;
+            margin-right: 10px;
+        }
+
+        #availabilityDate {
+            padding: 9px 12px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+
+        .period {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: #f8f9fa;
+            border: 1px solid #e1e4e8;
+            padding: 18px;
+            margin-bottom: 12px;
+            border-radius: 8px;
+        }
+
+        .period-info {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .period-number {
+            font-size: 17px;
+            font-weight: bold;
+            color: #222;
+        }
+
+        .period-time {
+            font-size: 14px;
+            color: #666;
         }
 
         .buttons {
             display: flex;
-            flex-direction: column;
-            gap: 15px;
-            margin-top: 25px;
+            gap: 8px;
         }
 
-        button {
-            padding: 15px;
+        .buttons button {
             border: none;
-            border-radius: 8px;
-            font-size: 17px;
-            font-weight: bold;
+            padding: 10px 14px;
+            border-radius: 5px;
+            color: white;
             cursor: pointer;
-        }
-
-        .attend {
-            background: #198754;
-            color: white;
-        }
-
-        .not-attend {
-            background: #dc3545;
-            color: white;
-        }
-
-        .leave {
-            background: #ffc107;
-            color: black;
-        }
-
-        button:hover {
-            opacity: 0.85;
-        }
-
-        .message {
-            background: #d1e7dd;
-            color: #0f5132;
-            padding: 12px;
-            border-radius: 8px;
-            margin-bottom: 20px;
             font-weight: bold;
+            font-size: 12px;
         }
 
-        .back {
-            display: inline-block;
+        .attend-btn {
+            background: #16803c;
+        }
+
+        .attend-btn:hover {
+            background: #116b31;
+        }
+
+        .cant-btn {
+            background: #a71930;
+        }
+
+        .cant-btn:hover {
+            background: #871426;
+        }
+
+        .leave-btn {
+            background: #a36b00;
+        }
+
+        .leave-btn:hover {
+            background: #855700;
+        }
+
+        .class-box {
             margin-top: 25px;
-            text-decoration: none;
-            color: #0d6efd;
+            padding: 20px;
+            border-radius: 8px;
+            background: #eef6ff;
+            border: 1px solid #b8d8ff;
+            display: none;
+        }
+
+        .class-box h3 {
+            margin-top: 0;
+            color: #174a7e;
+        }
+
+        .class-details {
+            line-height: 1.8;
+            color: #333;
+        }
+
+        .handover-btn {
+            margin-top: 15px;
+            padding: 11px 18px;
+            background: #7b2cbf;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
             font-weight: bold;
+        }
+
+        .handover-btn:hover {
+            background: #60209a;
+        }
+
+        .faculty-box {
+            margin-top: 20px;
+            padding: 20px;
+            background: #f8f9fa;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            display: none;
+        }
+
+        .faculty-box h3 {
+            margin-top: 0;
+            color: #222;
+        }
+
+        .faculty-count {
+            margin-bottom: 15px;
+            color: #555;
+            font-weight: bold;
+        }
+
+        .faculty-item {
+            background: white;
+            border: 1px solid #ddd;
+            padding: 15px;
+            margin-bottom: 10px;
+            border-radius: 6px;
+        }
+
+        .faculty-item strong {
+            color: #222;
+            font-size: 16px;
+        }
+
+        .faculty-item span {
+            color: #555;
+        }
+
+        .send-btn {
+            margin-top: 15px;
+            padding: 11px 18px;
+            background: #16803c;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+
+        .send-btn:hover {
+            background: #116b31;
+        }
+
+        .send-btn:disabled {
+            background: #777;
+            cursor: not-allowed;
+        }
+
+        .info-message {
+            padding: 12px;
+            background: #fff8e1;
+            border: 1px solid #f0d98c;
+            border-radius: 5px;
+            color: #795600;
+        }
+
+        .success-message {
+            padding: 12px;
+            background: #e8f5e9;
+            border: 1px solid #a5d6a7;
+            border-radius: 5px;
+            color: #256029;
+        }
+
+        @media (max-width: 700px) {
+
+            .container {
+                width: 95%;
+                padding: 20px;
+            }
+
+            .period {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 15px;
+            }
+
+            .buttons {
+                width: 100%;
+                flex-wrap: wrap;
+            }
+
+            .buttons button {
+                flex: 1;
+            }
+
         }
 
     </style>
 
 </head>
 
+
 <body>
+
 
 <div class="container">
 
-    <h1>📢 Faculty Availability</h1>
 
-    <div class="welcome">
+    <h1>
+        Faculty Availability
+    </h1>
 
-        Welcome,
-        <strong>
-            <?= htmlspecialchars($_SESSION['username']) ?>
-        </strong>
+
+    <p class="description">
+        Select your availability for each period.
+    </p>
+
+
+    <!-- DATE -->
+
+    <div class="date-section">
+
+        <label for="availabilityDate">
+            Date:
+        </label>
+
+        <input
+            type="date"
+            id="availabilityDate"
+            value="<?php echo date('Y-m-d'); ?>"
+        >
 
     </div>
 
 
-    <?php if ($message): ?>
+    <!-- PERIOD 1 -->
 
-        <div class="message">
-            <?= htmlspecialchars($message) ?>
+    <div class="period">
+
+        <div class="period-info">
+
+            <div class="period-number">
+                Period 1
+            </div>
+
+            <div class="period-time">
+                08:30 AM - 09:15 AM
+            </div>
+
         </div>
 
-    <?php endif; ?>
+
+        <div class="buttons">
+
+            <button
+                type="button"
+                class="attend-btn"
+                onclick="setAvailability(1, 'AVAILABLE')">
+
+                CAN ATTEND
+
+            </button>
 
 
-    <div class="current-status">
+            <button
+                type="button"
+                class="cant-btn"
+                onclick="setAvailability(1, 'UNAVAILABLE')">
 
-        Current Availability:
+                CAN'T GO
 
-        <strong>
-            <?= htmlspecialchars($current_status) ?>
-        </strong>
+            </button>
+
+
+            <button
+                type="button"
+                class="leave-btn"
+                onclick="setAvailability(1, 'LEAVE')">
+
+                LEAVE
+
+            </button>
+
+        </div>
 
     </div>
 
 
-    <p>Select your availability status:</p>
+    <!-- PERIOD 2 -->
+
+    <div class="period">
+
+        <div class="period-info">
+
+            <div class="period-number">
+                Period 2
+            </div>
+
+            <div class="period-time">
+                09:15 AM - 10:00 AM
+            </div>
+
+        </div>
 
 
-    <div class="buttons">
+        <div class="buttons">
 
-        <form method="POST">
+            <button
+                type="button"
+                class="attend-btn"
+                onclick="setAvailability(2, 'AVAILABLE')">
 
-            <input type="hidden"
-                   name="status"
-                   value="I CAN ATTEND">
-
-            <button type="submit"
-                    class="attend">
-
-                ✓ I CAN ATTEND
-
-            </button>
-
-        </form>
-
-
-        <form method="POST">
-
-            <input type="hidden"
-                   name="status"
-                   value="I CAN'T GO">
-
-            <button type="submit"
-                    class="not-attend">
-
-                ✕ I CAN'T GO
+                CAN ATTEND
 
             </button>
 
-        </form>
 
+            <button
+                type="button"
+                class="cant-btn"
+                onclick="setAvailability(2, 'UNAVAILABLE')">
 
-        <form method="POST">
-
-            <input type="hidden"
-                   name="status"
-                   value="LEAVE">
-
-            <button type="submit"
-                    class="leave">
-
-                🏖 LEAVE
+                CAN'T GO
 
             </button>
 
-        </form>
+
+            <button
+                type="button"
+                class="leave-btn"
+                onclick="setAvailability(2, 'LEAVE')">
+
+                LEAVE
+
+            </button>
+
+        </div>
 
     </div>
 
 
-    <a class="back"
-       href="dashboard.php">
+    <!-- PERIOD 3 -->
 
-        ← Back to Dashboard
+    <div class="period">
 
-    </a>
+        <div class="period-info">
+
+            <div class="period-number">
+                Period 3
+            </div>
+
+            <div class="period-time">
+                10:00 AM - 10:45 AM
+            </div>
+
+        </div>
+
+
+        <div class="buttons">
+
+            <button
+                type="button"
+                class="attend-btn"
+                onclick="setAvailability(3, 'AVAILABLE')">
+
+                CAN ATTEND
+
+            </button>
+
+
+            <button
+                type="button"
+                class="cant-btn"
+                onclick="setAvailability(3, 'UNAVAILABLE')">
+
+                CAN'T GO
+
+            </button>
+
+
+            <button
+                type="button"
+                class="leave-btn"
+                onclick="setAvailability(3, 'LEAVE')">
+
+                LEAVE
+
+            </button>
+
+        </div>
+
+    </div>
+
+
+    <!-- PERIOD 4 -->
+
+    <div class="period">
+
+        <div class="period-info">
+
+            <div class="period-number">
+                Period 4
+            </div>
+
+            <div class="period-time">
+                11:00 AM - 11:45 AM
+            </div>
+
+        </div>
+
+
+        <div class="buttons">
+
+            <button
+                type="button"
+                class="attend-btn"
+                onclick="setAvailability(4, 'AVAILABLE')">
+
+                CAN ATTEND
+
+            </button>
+
+
+            <button
+                type="button"
+                class="cant-btn"
+                onclick="setAvailability(4, 'UNAVAILABLE')">
+
+                CAN'T GO
+
+            </button>
+
+
+            <button
+                type="button"
+                class="leave-btn"
+                onclick="setAvailability(4, 'LEAVE')">
+
+                LEAVE
+
+            </button>
+
+        </div>
+
+    </div>
+
+
+    <!-- PERIOD 5 -->
+
+    <div class="period">
+
+        <div class="period-info">
+
+            <div class="period-number">
+                Period 5
+            </div>
+
+            <div class="period-time">
+                11:45 AM - 12:30 PM
+            </div>
+
+        </div>
+
+
+        <div class="buttons">
+
+            <button
+                type="button"
+                class="attend-btn"
+                onclick="setAvailability(5, 'AVAILABLE')">
+
+                CAN ATTEND
+
+            </button>
+
+
+            <button
+                type="button"
+                class="cant-btn"
+                onclick="setAvailability(5, 'UNAVAILABLE')">
+
+                CAN'T GO
+
+            </button>
+
+
+            <button
+                type="button"
+                class="leave-btn"
+                onclick="setAvailability(5, 'LEAVE')">
+
+                LEAVE
+
+            </button>
+
+        </div>
+
+    </div>
+
+
+    <!-- PERIOD 6 -->
+
+    <div class="period">
+
+        <div class="period-info">
+
+            <div class="period-number">
+                Period 6
+            </div>
+
+            <div class="period-time">
+                12:30 PM - 01:15 PM
+            </div>
+
+        </div>
+
+
+        <div class="buttons">
+
+            <button
+                type="button"
+                class="attend-btn"
+                onclick="setAvailability(6, 'AVAILABLE')">
+
+                CAN ATTEND
+
+            </button>
+
+
+            <button
+                type="button"
+                class="cant-btn"
+                onclick="setAvailability(6, 'UNAVAILABLE')">
+
+                CAN'T GO
+
+            </button>
+
+
+            <button
+                type="button"
+                class="leave-btn"
+                onclick="setAvailability(6, 'LEAVE')">
+
+                LEAVE
+
+            </button>
+
+        </div>
+
+    </div>
+
+
+    <!-- PERIOD 7 -->
+
+    <div class="period">
+
+        <div class="period-info">
+
+            <div class="period-number">
+                Period 7
+            </div>
+
+            <div class="period-time">
+                02:00 PM - 02:45 PM
+            </div>
+
+        </div>
+
+
+        <div class="buttons">
+
+            <button
+                type="button"
+                class="attend-btn"
+                onclick="setAvailability(7, 'AVAILABLE')">
+
+                CAN ATTEND
+
+            </button>
+
+
+            <button
+                type="button"
+                class="cant-btn"
+                onclick="setAvailability(7, 'UNAVAILABLE')">
+
+                CAN'T GO
+
+            </button>
+
+
+            <button
+                type="button"
+                class="leave-btn"
+                onclick="setAvailability(7, 'LEAVE')">
+
+                LEAVE
+
+            </button>
+
+        </div>
+
+    </div>
+
+
+    <!-- PERIOD 8 -->
+
+    <div class="period">
+
+        <div class="period-info">
+
+            <div class="period-number">
+                Period 8
+            </div>
+
+            <div class="period-time">
+                02:45 PM - 03:30 PM
+            </div>
+
+        </div>
+
+
+        <div class="buttons">
+
+            <button
+                type="button"
+                class="attend-btn"
+                onclick="setAvailability(8, 'AVAILABLE')">
+
+                CAN ATTEND
+
+            </button>
+
+
+            <button
+                type="button"
+                class="cant-btn"
+                onclick="setAvailability(8, 'UNAVAILABLE')">
+
+                CAN'T GO
+
+            </button>
+
+
+            <button
+                type="button"
+                class="leave-btn"
+                onclick="setAvailability(8, 'LEAVE')">
+
+                LEAVE
+
+            </button>
+
+        </div>
+
+    </div>
+
+
+    <!-- PERIOD 9 -->
+
+    <div class="period">
+
+        <div class="period-info">
+
+            <div class="period-number">
+                Period 9
+            </div>
+
+            <div class="period-time">
+                03:45 PM - 04:30 PM
+            </div>
+
+        </div>
+
+
+        <div class="buttons">
+
+            <button
+                type="button"
+                class="attend-btn"
+                onclick="setAvailability(9, 'AVAILABLE')">
+
+                CAN ATTEND
+
+            </button>
+
+
+            <button
+                type="button"
+                class="cant-btn"
+                onclick="setAvailability(9, 'UNAVAILABLE')">
+
+                CAN'T GO
+
+            </button>
+
+
+            <button
+                type="button"
+                class="leave-btn"
+                onclick="setAvailability(9, 'LEAVE')">
+
+                LEAVE
+
+            </button>
+
+        </div>
+
+    </div>
+
+
+    <!-- CLASS FOUND -->
+
+    <div
+        id="classBox"
+        class="class-box">
+
+        <h3>
+            Class Found
+        </h3>
+
+        <div
+            id="classDetails"
+            class="class-details">
+        </div>
+
+        <button
+            type="button"
+            class="handover-btn"
+            onclick="startHandover()">
+
+            FIND AVAILABLE FACULTY
+
+        </button>
+
+    </div>
+
+
+    <!-- AVAILABLE FACULTY -->
+
+    <div
+        id="facultyBox"
+        class="faculty-box">
+
+        <h3>
+            Available Faculty - Same Department
+        </h3>
+
+        <div
+            id="facultyCount"
+            class="faculty-count">
+        </div>
+
+        <div id="facultyList"></div>
+
+        <button
+            id="sendRequestButton"
+            type="button"
+            class="send-btn"
+            style="display:none;"
+            onclick="sendHandoverRequest()">
+
+            SEND HANDOVER REQUEST TO ALL
+
+        </button>
+
+    </div>
+
 
 </div>
+
+
+<script>
+
+
+/* =========================================================
+   GLOBAL VARIABLES
+   ========================================================= */
+
+let selectedTimetableId = null;
+
+let selectedPeriodId = null;
+
+
+/* =========================================================
+   SAVE AVAILABILITY
+   ========================================================= */
+
+async function setAvailability(
+    periodId,
+    status
+) {
+
+    const date =
+        document.getElementById(
+            "availabilityDate"
+        ).value;
+
+
+    if (!date) {
+
+        alert(
+            "Please select a date."
+        );
+
+        return;
+    }
+
+
+    let reason = "";
+
+
+    if (
+        status === "UNAVAILABLE"
+    ) {
+
+        reason = prompt(
+            "Why can't you attend this period?"
+        );
+
+
+        if (
+            reason === null ||
+            reason.trim() === ""
+        ) {
+
+            alert(
+                "Please provide a reason."
+            );
+
+            return;
+        }
+
+    }
+
+
+    const formData =
+        new FormData();
+
+
+    formData.append(
+        "date",
+        date
+    );
+
+
+    formData.append(
+        "period_id",
+        periodId
+    );
+
+
+    formData.append(
+        "status",
+        status
+    );
+
+
+    formData.append(
+        "reason",
+        reason
+    );
+
+
+    try {
+
+        const response =
+            await fetch(
+                "../api/availability.php",
+                {
+                    method: "POST",
+                    body: formData
+                }
+            );
+
+
+        const text =
+            await response.text();
+
+
+        console.log(
+            "Availability API:",
+            text
+        );
+
+
+        let data;
+
+
+        try {
+
+            data =
+                JSON.parse(text);
+
+        } catch (error) {
+
+            alert(
+                "Invalid server response.\n\n" +
+                text
+            );
+
+            return;
+        }
+
+
+        if (
+            data.success
+        ) {
+
+            alert(
+                data.message
+            );
+
+
+            if (
+                status === "UNAVAILABLE"
+            ) {
+
+                await checkClass(
+                    date,
+                    periodId
+                );
+
+            }
+
+        } else {
+
+            alert(
+                data.message ||
+                "Something went wrong."
+            );
+
+        }
+
+
+    } catch (error) {
+
+        console.error(
+            error
+        );
+
+
+        alert(
+            "Unable to connect to server.\n\n" +
+            error.message
+        );
+
+    }
+
+}
+
+
+/* =========================================================
+   CHECK CLASS
+   ========================================================= */
+
+async function checkClass(
+    date,
+    periodId
+) {
+
+    const formData =
+        new FormData();
+
+
+    formData.append(
+        "date",
+        date
+    );
+
+
+    formData.append(
+        "period_id",
+        periodId
+    );
+
+
+    try {
+
+        const response =
+            await fetch(
+                "../api/check_class.php",
+                {
+                    method: "POST",
+                    body: formData
+                }
+            );
+
+
+        const text =
+            await response.text();
+
+
+        console.log(
+            "Class Check API:",
+            text
+        );
+
+
+        let data;
+
+
+        try {
+
+            data =
+                JSON.parse(text);
+
+        } catch (error) {
+
+            alert(
+                "Invalid class response.\n\n" +
+                text
+            );
+
+            return;
+        }
+
+
+        if (
+            data.success &&
+            data.class_found
+        ) {
+
+            const c =
+                data.class;
+
+
+            selectedTimetableId =
+                c.timetable_id;
+
+
+            selectedPeriodId =
+                periodId;
+
+
+            document.getElementById(
+                "classDetails"
+            ).innerHTML =
+
+                "<strong>Date:</strong> " +
+                escapeHtml(date) +
+                "<br>" +
+
+                "<strong>Day:</strong> " +
+                escapeHtml(data.day) +
+                "<br>" +
+
+                "<strong>Timetable ID:</strong> " +
+                escapeHtml(c.timetable_id) +
+                "<br>" +
+
+                "<strong>Period:</strong> " +
+                escapeHtml(c.period_id) +
+                "<br>" +
+
+                "<strong>Section ID:</strong> " +
+                escapeHtml(c.section_id) +
+                "<br>" +
+
+                "<strong>Subject ID:</strong> " +
+                escapeHtml(c.subject_id) +
+                "<br>" +
+
+                "<strong>Classroom ID:</strong> " +
+                escapeHtml(c.classroom_id);
+
+
+            document.getElementById(
+                "classBox"
+            ).style.display =
+                "block";
+
+
+            document.getElementById(
+                "facultyBox"
+            ).style.display =
+                "none";
+
+
+            document.getElementById(
+                "facultyList"
+            ).innerHTML =
+                "";
+
+
+            document.getElementById(
+                "facultyCount"
+            ).innerHTML =
+                "";
+
+
+            document.getElementById(
+                "sendRequestButton"
+            ).style.display =
+                "none";
+
+
+            document.getElementById(
+                "sendRequestButton"
+            ).disabled =
+                false;
+
+
+            document.getElementById(
+                "sendRequestButton"
+            ).innerText =
+                "SEND HANDOVER REQUEST TO ALL";
+
+
+        } else {
+
+            selectedTimetableId =
+                null;
+
+
+            selectedPeriodId =
+                null;
+
+
+            document.getElementById(
+                "classBox"
+            ).style.display =
+                "none";
+
+
+            document.getElementById(
+                "facultyBox"
+            ).style.display =
+                "none";
+
+
+            alert(
+                "No class is scheduled for this faculty in this period."
+            );
+
+        }
+
+
+    } catch (error) {
+
+        console.error(
+            error
+        );
+
+
+        alert(
+            "Unable to check class.\n\n" +
+            error.message
+        );
+
+    }
+
+}
+
+
+/* =========================================================
+   FIND ALL AVAILABLE FACULTY
+   ========================================================= */
+
+async function startHandover() {
+
+    if (
+        !selectedTimetableId
+    ) {
+
+        alert(
+            "No class selected."
+        );
+
+        return;
+    }
+
+
+    const date =
+        document.getElementById(
+            "availabilityDate"
+        ).value;
+
+
+    if (!date) {
+
+        alert(
+            "Please select a date."
+        );
+
+        return;
+    }
+
+
+    if (
+        !selectedPeriodId
+    ) {
+
+        alert(
+            "Period information is missing."
+        );
+
+        return;
+    }
+
+
+    const facultyBox =
+        document.getElementById(
+            "facultyBox"
+        );
+
+
+    const facultyListDiv =
+        document.getElementById(
+            "facultyList"
+        );
+
+
+    const facultyCount =
+        document.getElementById(
+            "facultyCount"
+        );
+
+
+    const sendButton =
+        document.getElementById(
+            "sendRequestButton"
+        );
+
+
+    facultyListDiv.innerHTML =
+        "<p>Checking available faculty...</p>";
+
+
+    facultyCount.innerHTML =
+        "";
+
+
+    sendButton.style.display =
+        "none";
+
+
+    sendButton.disabled =
+        false;
+
+
+    sendButton.innerText =
+        "SEND HANDOVER REQUEST TO ALL";
+
+
+    facultyBox.style.display =
+        "block";
+
+
+    const formData =
+        new FormData();
+
+
+    formData.append(
+        "date",
+        date
+    );
+
+
+    formData.append(
+        "period_id",
+        selectedPeriodId
+    );
+
+
+    try {
+
+        const response =
+            await fetch(
+                "../api/find_alternate_faculty.php",
+                {
+                    method: "POST",
+                    body: formData
+                }
+            );
+
+
+        const text =
+            await response.text();
+
+
+        console.log(
+            "Alternate Faculty API:",
+            text
+        );
+
+
+        let data;
+
+
+        try {
+
+            data =
+                JSON.parse(text);
+
+        } catch (error) {
+
+            facultyListDiv.innerHTML =
+
+                "<div class='info-message'>" +
+
+                "Invalid server response." +
+
+                "</div>";
+
+            console.error(
+                text
+            );
+
+            return;
+        }
+
+
+        if (
+            !data.success
+        ) {
+
+            facultyListDiv.innerHTML =
+
+                "<div class='info-message'>" +
+
+                escapeHtml(
+                    data.message ||
+                    "Unable to find available faculty."
+                ) +
+
+                "</div>";
+
+            return;
+        }
+
+
+        const availableFaculty =
+            data.faculty || [];
+
+
+        facultyListDiv.innerHTML =
+            "";
+
+
+        /* =================================================
+           NO AVAILABLE FACULTY
+           ================================================= */
+
+        if (
+            availableFaculty.length === 0
+        ) {
+
+            facultyCount.innerHTML =
+                "0 available faculty members found.";
+
+
+            facultyListDiv.innerHTML =
+
+                "<div class='info-message'>" +
+
+                "No available faculty members were found " +
+
+                "in the same department for this period." +
+
+                "</div>";
+
+
+            sendButton.style.display =
+                "none";
+
+
+            return;
+        }
+
+
+        /* =================================================
+           SHOW COUNT
+           ================================================= */
+
+        facultyCount.innerHTML =
+
+            availableFaculty.length +
+
+            " available faculty member" +
+
+            (
+                availableFaculty.length > 1
+                    ? "s"
+                    : ""
+            ) +
+
+            " found in the same department.";
+
+
+        /* =================================================
+           DISPLAY ALL FACULTY
+           ================================================= */
+
+        availableFaculty.forEach(
+            function(faculty) {
+
+                const item =
+                    document.createElement(
+                        "div"
+                    );
+
+
+                item.className =
+                    "faculty-item";
+
+
+                item.innerHTML =
+
+                    "<strong>" +
+
+                    escapeHtml(
+                        faculty.faculty_name
+                    ) +
+
+                    "</strong>" +
+
+                    "<br><br>" +
+
+                    "<span>" +
+
+                    "<strong>Faculty Code:</strong> " +
+
+                    escapeHtml(
+                        faculty.faculty_code
+                    ) +
+
+                    "</span>" +
+
+                    "<br>" +
+
+                    "<span>" +
+
+                    "<strong>Email:</strong> " +
+
+                    escapeHtml(
+                        faculty.email
+                    ) +
+
+                    "</span>" +
+
+                    "<br>" +
+
+                    "<span>" +
+
+                    "<strong>Designation:</strong> " +
+
+                    escapeHtml(
+                        faculty.designation ||
+                        "N/A"
+                    ) +
+
+                    "</span>" +
+
+                    "<br>" +
+
+                    "<span>" +
+
+                    "<strong>Status:</strong> Available" +
+
+                    "</span>";
+
+
+                facultyListDiv.appendChild(
+                    item
+                );
+
+            }
+        );
+
+
+        /* =================================================
+           SHOW SEND BUTTON
+           ================================================= */
+
+        sendButton.style.display =
+            "inline-block";
+
+
+    } catch (error) {
+
+        console.error(
+            "Alternate Faculty Error:",
+            error
+        );
+
+
+        facultyListDiv.innerHTML =
+
+            "<div class='info-message'>" +
+
+            "Unable to connect to server.<br><br>" +
+
+            escapeHtml(
+                error.message
+            ) +
+
+            "</div>";
+
+
+    }
+
+}
+
+
+/* =========================================================
+   SEND HANDOVER REQUEST TO ALL
+   ========================================================= */
+
+async function sendHandoverRequest() {
+
+    if (
+        !selectedTimetableId
+    ) {
+
+        alert(
+            "No class selected."
+        );
+
+        return;
+    }
+
+
+    const date =
+        document.getElementById(
+            "availabilityDate"
+        ).value;
+
+
+    if (!date) {
+
+        alert(
+            "Please select a date."
+        );
+
+        return;
+    }
+
+
+    if (
+        !selectedPeriodId
+    ) {
+
+        alert(
+            "Period information is missing."
+        );
+
+        return;
+    }
+
+
+    const reason =
+        prompt(
+            "Enter the reason for handover:"
+        );
+
+
+    if (
+        reason === null ||
+        reason.trim() === ""
+    ) {
+
+        alert(
+            "Please provide a handover reason."
+        );
+
+        return;
+    }
+
+
+    const facultyCountText =
+        document.getElementById(
+            "facultyCount"
+        ).innerText;
+
+
+    const confirmSend =
+        confirm(
+
+            "Send the handover request to ALL available faculty members?\n\n" +
+
+            facultyCountText
+
+        );
+
+
+    if (!confirmSend) {
+
+        return;
+    }
+
+
+    const sendButton =
+        document.getElementById(
+            "sendRequestButton"
+        );
+
+
+    sendButton.disabled =
+        true;
+
+
+    sendButton.innerText =
+        "SENDING REQUESTS...";
+
+
+    const formData =
+        new FormData();
+
+
+    formData.append(
+        "date",
+        date
+    );
+
+
+    formData.append(
+        "timetable_id",
+        selectedTimetableId
+    );
+
+
+    formData.append(
+        "reason",
+        reason
+    );
+
+
+    try {
+
+        const response =
+            await fetch(
+                "../api/create_handover.php",
+                {
+                    method: "POST",
+                    body: formData
+                }
+            );
+
+
+        const text =
+            await response.text();
+
+
+        console.log(
+            "Create Handover API:",
+            text
+        );
+
+
+        let data;
+
+
+        try {
+
+            data =
+                JSON.parse(text);
+
+        } catch (error) {
+
+            sendButton.disabled =
+                false;
+
+
+            sendButton.innerText =
+                "SEND HANDOVER REQUEST TO ALL";
+
+
+            alert(
+                "Invalid handover response.\n\n" +
+                text
+            );
+
+            return;
+        }
+
+
+        if (
+            data.success
+        ) {
+
+            const requestCount =
+                data.request_count || 0;
+
+
+            alert(
+
+                "Handover request sent successfully!\n\n" +
+
+                "Requests sent to " +
+
+                requestCount +
+
+                " available faculty member" +
+
+                (
+                    requestCount !== 1
+                        ? "s."
+                        : "."
+                )
+
+            );
+
+
+            sendButton.disabled =
+                true;
+
+
+            sendButton.innerText =
+                "REQUESTS SENT";
+
+
+            sendButton.style.background =
+                "#777";
+
+
+        } else {
+
+            sendButton.disabled =
+                false;
+
+
+            sendButton.innerText =
+                "SEND HANDOVER REQUEST TO ALL";
+
+
+            alert(
+                data.message ||
+                "Unable to create handover request."
+            );
+
+        }
+
+
+    } catch (error) {
+
+        console.error(
+            "Handover Request Error:",
+            error
+        );
+
+
+        sendButton.disabled =
+            false;
+
+
+        sendButton.innerText =
+            "SEND HANDOVER REQUEST TO ALL";
+
+
+        alert(
+
+            "Unable to send handover request.\n\n" +
+
+            error.message
+
+        );
+
+    }
+
+}
+
+
+/* =========================================================
+   HTML ESCAPE
+   ========================================================= */
+
+function escapeHtml(value) {
+
+    if (
+        value === null ||
+        value === undefined
+    ) {
+
+        return "";
+
+    }
+
+
+    return String(value)
+
+        .replace(
+            /&/g,
+            "&amp;"
+        )
+
+        .replace(
+            /</g,
+            "&lt;"
+        )
+
+        .replace(
+            />/g,
+            "&gt;"
+        )
+
+        .replace(
+            /"/g,
+            "&quot;"
+        )
+
+        .replace(
+            /'/g,
+            "&#039;"
+        );
+
+}
+
+</script>
 
 </body>
 

@@ -29,7 +29,7 @@ if (!isset($_SESSION['user_id'])) {
 
 if (
     !isset($_SESSION['role']) ||
-    $_SESSION['role'] !== 'FACULTY'
+    strtoupper($_SESSION['role']) !== 'FACULTY'
 ) {
 
     echo json_encode([
@@ -114,7 +114,8 @@ $stmt =
     $conn->prepare("
         SELECT
             faculty_id,
-            faculty_name
+            faculty_name,
+            department_id
         FROM faculty
         WHERE user_id = ?
         LIMIT 1
@@ -170,6 +171,9 @@ $currentFaculty =
 $original_faculty_id =
     (int) $currentFaculty['faculty_id'];
 
+$department_id =
+    (int) $currentFaculty['department_id'];
+
 
 $stmt->close();
 
@@ -194,10 +198,11 @@ $day =
    Rules:
 
    1. Faculty must be active.
-   2. Faculty must not be the original faculty.
-   3. Faculty must not be UNAVAILABLE.
-   4. Faculty must not be on LEAVE.
-   5. Faculty must not already have a class
+   2. Faculty must belong to SAME department.
+   3. Faculty must not be the original faculty.
+   4. Faculty must not be UNAVAILABLE.
+   5. Faculty must not be on LEAVE.
+   6. Faculty must not already have a class
       in the selected period.
    ========================================================= */
 
@@ -250,8 +255,17 @@ $sql = "
         u.status = 'ACTIVE'
 
 
+        /* SAME DEPARTMENT */
+
+        AND f.department_id = ?
+
+
+        /* DO NOT INCLUDE ORIGINAL FACULTY */
+
         AND f.faculty_id != ?
 
+
+        /* FACULTY MUST BE AVAILABLE */
 
         AND (
 
@@ -261,6 +275,8 @@ $sql = "
 
         )
 
+
+        /* FACULTY MUST NOT HAVE A CLASS */
 
         AND t.timetable_id IS NULL
 
@@ -293,23 +309,25 @@ if (!$stmt) {
    BIND PARAMETERS
    =========================================================
 
-   date       = s
-   period_id  = i
-   day        = s
-   period_id  = i
-   faculty_id = i
+   date             = s
+   period_id        = i
+   day              = s
+   period_id        = i
+   department_id    = i
+   faculty_id       = i
 
    Therefore:
 
-   s i s i i
+   s i s i i i
    ========================================================= */
 
 $stmt->bind_param(
-    "sisii",
+    "sisiii",
     $date,
     $period_id,
     $day,
     $period_id,
+    $department_id,
     $original_faculty_id
 );
 
@@ -371,7 +389,7 @@ if (
         "count" => 0,
 
         "message" =>
-            "No eligible alternate faculty found.",
+            "No eligible faculty found in the same department.",
 
         "date" =>
             $date,
@@ -381,6 +399,9 @@ if (
 
         "period_id" =>
             $period_id,
+
+        "department_id" =>
+            $department_id,
 
         "faculty" =>
             []
@@ -397,7 +418,7 @@ if (
             count($faculty_list),
 
         "message" =>
-            "Eligible alternate faculty found.",
+            "Eligible faculty from the same department found.",
 
         "date" =>
             $date,
@@ -407,6 +428,9 @@ if (
 
         "period_id" =>
             $period_id,
+
+        "department_id" =>
+            $department_id,
 
         "faculty" =>
             $faculty_list

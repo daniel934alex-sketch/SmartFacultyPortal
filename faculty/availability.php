@@ -7,7 +7,7 @@ if (!isset($_SESSION['user_id'])) {
     exit;
 }
 
-if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'FACULTY') {
+if (!isset($_SESSION['role']) || strtoupper($_SESSION['role']) !== 'FACULTY') {
     header("Location: ../auth/login.php");
     exit;
 }
@@ -25,13 +25,11 @@ if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'FACULTY') {
 
     <title>Faculty Availability</title>
 
-
     <style>
 
         * {
             box-sizing: border-box;
         }
-
 
         body {
             margin: 0;
@@ -39,7 +37,6 @@ if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'FACULTY') {
             font-family: Arial, sans-serif;
             background: #f4f6f9;
         }
-
 
         .container {
             width: 80%;
@@ -51,29 +48,24 @@ if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'FACULTY') {
             box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
         }
 
-
         h1 {
             margin-top: 0;
             color: #222;
         }
-
 
         .description {
             color: #555;
             margin-bottom: 25px;
         }
 
-
         .date-section {
             margin-bottom: 25px;
         }
-
 
         .date-section label {
             font-weight: bold;
             margin-right: 10px;
         }
-
 
         #availabilityDate {
             padding: 9px 12px;
@@ -81,7 +73,6 @@ if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'FACULTY') {
             border-radius: 5px;
             font-size: 14px;
         }
-
 
         .period {
             display: flex;
@@ -94,13 +85,11 @@ if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'FACULTY') {
             border-radius: 8px;
         }
 
-
         .period-info {
             display: flex;
             flex-direction: column;
             gap: 6px;
         }
-
 
         .period-number {
             font-size: 17px;
@@ -108,18 +97,15 @@ if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'FACULTY') {
             color: #222;
         }
 
-
         .period-time {
             font-size: 14px;
             color: #666;
         }
 
-
         .buttons {
             display: flex;
             gap: 8px;
         }
-
 
         .buttons button {
             border: none;
@@ -131,36 +117,29 @@ if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'FACULTY') {
             font-size: 12px;
         }
 
-
         .attend-btn {
             background: #16803c;
         }
-
 
         .attend-btn:hover {
             background: #116b31;
         }
 
-
         .cant-btn {
             background: #a71930;
         }
-
 
         .cant-btn:hover {
             background: #871426;
         }
 
-
         .leave-btn {
             background: #a36b00;
         }
 
-
         .leave-btn:hover {
             background: #855700;
         }
-
 
         .class-box {
             margin-top: 25px;
@@ -171,18 +150,15 @@ if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'FACULTY') {
             display: none;
         }
 
-
         .class-box h3 {
             margin-top: 0;
             color: #174a7e;
         }
 
-
         .class-details {
             line-height: 1.8;
             color: #333;
         }
-
 
         .handover-btn {
             margin-top: 15px;
@@ -195,11 +171,9 @@ if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'FACULTY') {
             font-weight: bold;
         }
 
-
         .handover-btn:hover {
             background: #60209a;
         }
-
 
         .faculty-box {
             margin-top: 20px;
@@ -210,11 +184,16 @@ if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'FACULTY') {
             display: none;
         }
 
-
         .faculty-box h3 {
             margin-top: 0;
+            color: #222;
         }
 
+        .faculty-count {
+            margin-bottom: 15px;
+            color: #555;
+            font-weight: bold;
+        }
 
         .faculty-item {
             background: white;
@@ -224,28 +203,14 @@ if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'FACULTY') {
             border-radius: 6px;
         }
 
-
         .faculty-item strong {
             color: #222;
+            font-size: 16px;
         }
 
-
-        .select-btn {
-            margin-top: 10px;
-            padding: 8px 14px;
-            background: #2563eb;
-            color: white;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-            font-weight: bold;
+        .faculty-item span {
+            color: #555;
         }
-
-
-        .select-btn:hover {
-            background: #1d4ed8;
-        }
-
 
         .send-btn {
             margin-top: 15px;
@@ -258,27 +223,30 @@ if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'FACULTY') {
             font-weight: bold;
         }
 
-
         .send-btn:hover {
             background: #116b31;
         }
-
 
         .send-btn:disabled {
             background: #777;
             cursor: not-allowed;
         }
 
+        .info-message {
+            padding: 12px;
+            background: #fff8e1;
+            border: 1px solid #f0d98c;
+            border-radius: 5px;
+            color: #795600;
+        }
 
-        .selected-faculty {
-            margin-top: 15px;
+        .success-message {
             padding: 12px;
             background: #e8f5e9;
             border: 1px solid #a5d6a7;
             border-radius: 5px;
-            font-weight: bold;
+            color: #256029;
         }
-
 
         @media (max-width: 700px) {
 
@@ -287,19 +255,16 @@ if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'FACULTY') {
                 padding: 20px;
             }
 
-
             .period {
                 flex-direction: column;
                 align-items: flex-start;
                 gap: 15px;
             }
 
-
             .buttons {
                 width: 100%;
                 flex-wrap: wrap;
             }
-
 
             .buttons button {
                 flex: 1;
@@ -828,52 +793,43 @@ if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'FACULTY') {
         id="classBox"
         class="class-box">
 
-
         <h3>
             Class Found
         </h3>
-
 
         <div
             id="classDetails"
             class="class-details">
         </div>
 
-
         <button
             type="button"
             class="handover-btn"
             onclick="startHandover()">
 
-            FIND ALTERNATE FACULTY
+            FIND AVAILABLE FACULTY
 
         </button>
-
 
     </div>
 
 
-    <!-- ALTERNATE FACULTY -->
+    <!-- AVAILABLE FACULTY -->
 
     <div
         id="facultyBox"
         class="faculty-box">
 
-
         <h3>
-            Eligible Alternate Faculty
+            Available Faculty - Same Department
         </h3>
 
-
-        <div id="facultyList"></div>
-
-
         <div
-            id="selectedFacultyBox"
-            class="selected-faculty"
-            style="display:none;">
+            id="facultyCount"
+            class="faculty-count">
         </div>
 
+        <div id="facultyList"></div>
 
         <button
             id="sendRequestButton"
@@ -882,10 +838,9 @@ if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'FACULTY') {
             style="display:none;"
             onclick="sendHandoverRequest()">
 
-            SEND HANDOVER REQUEST
+            SEND HANDOVER REQUEST TO ALL
 
         </button>
-
 
     </div>
 
@@ -903,10 +858,6 @@ if (!isset($_SESSION['role']) || $_SESSION['role'] !== 'FACULTY') {
 let selectedTimetableId = null;
 
 let selectedPeriodId = null;
-
-let selectedAlternateFacultyId = null;
-
-let selectedAlternateFacultyName = "";
 
 
 /* =========================================================
@@ -1165,31 +1116,31 @@ async function checkClass(
             ).innerHTML =
 
                 "<strong>Date:</strong> " +
-                date +
+                escapeHtml(date) +
                 "<br>" +
 
                 "<strong>Day:</strong> " +
-                data.day +
+                escapeHtml(data.day) +
                 "<br>" +
 
                 "<strong>Timetable ID:</strong> " +
-                c.timetable_id +
+                escapeHtml(c.timetable_id) +
                 "<br>" +
 
                 "<strong>Period:</strong> " +
-                c.period_id +
+                escapeHtml(c.period_id) +
                 "<br>" +
 
                 "<strong>Section ID:</strong> " +
-                c.section_id +
+                escapeHtml(c.section_id) +
                 "<br>" +
 
                 "<strong>Subject ID:</strong> " +
-                c.subject_id +
+                escapeHtml(c.subject_id) +
                 "<br>" +
 
                 "<strong>Classroom ID:</strong> " +
-                c.classroom_id;
+                escapeHtml(c.classroom_id);
 
 
             document.getElementById(
@@ -1204,6 +1155,36 @@ async function checkClass(
                 "none";
 
 
+            document.getElementById(
+                "facultyList"
+            ).innerHTML =
+                "";
+
+
+            document.getElementById(
+                "facultyCount"
+            ).innerHTML =
+                "";
+
+
+            document.getElementById(
+                "sendRequestButton"
+            ).style.display =
+                "none";
+
+
+            document.getElementById(
+                "sendRequestButton"
+            ).disabled =
+                false;
+
+
+            document.getElementById(
+                "sendRequestButton"
+            ).innerText =
+                "SEND HANDOVER REQUEST TO ALL";
+
+
         } else {
 
             selectedTimetableId =
@@ -1216,6 +1197,12 @@ async function checkClass(
 
             document.getElementById(
                 "classBox"
+            ).style.display =
+                "none";
+
+
+            document.getElementById(
+                "facultyBox"
             ).style.display =
                 "none";
 
@@ -1245,7 +1232,7 @@ async function checkClass(
 
 
 /* =========================================================
-   FIND ALTERNATE FACULTY
+   FIND ALL AVAILABLE FACULTY
    ========================================================= */
 
 async function startHandover() {
@@ -1268,6 +1255,16 @@ async function startHandover() {
         ).value;
 
 
+    if (!date) {
+
+        alert(
+            "Please select a date."
+        );
+
+        return;
+    }
+
+
     if (
         !selectedPeriodId
     ) {
@@ -1278,6 +1275,54 @@ async function startHandover() {
 
         return;
     }
+
+
+    const facultyBox =
+        document.getElementById(
+            "facultyBox"
+        );
+
+
+    const facultyListDiv =
+        document.getElementById(
+            "facultyList"
+        );
+
+
+    const facultyCount =
+        document.getElementById(
+            "facultyCount"
+        );
+
+
+    const sendButton =
+        document.getElementById(
+            "sendRequestButton"
+        );
+
+
+    facultyListDiv.innerHTML =
+        "<p>Checking available faculty...</p>";
+
+
+    facultyCount.innerHTML =
+        "";
+
+
+    sendButton.style.display =
+        "none";
+
+
+    sendButton.disabled =
+        false;
+
+
+    sendButton.innerText =
+        "SEND HANDOVER REQUEST TO ALL";
+
+
+    facultyBox.style.display =
+        "block";
 
 
     const formData =
@@ -1328,8 +1373,15 @@ async function startHandover() {
 
         } catch (error) {
 
-            alert(
-                "Invalid alternate faculty response.\n\n" +
+            facultyListDiv.innerHTML =
+
+                "<div class='info-message'>" +
+
+                "Invalid server response." +
+
+                "</div>";
+
+            console.error(
                 text
             );
 
@@ -1341,79 +1393,85 @@ async function startHandover() {
             !data.success
         ) {
 
-            alert(
-                data.message ||
-                "Unable to find alternate faculty."
-            );
+            facultyListDiv.innerHTML =
+
+                "<div class='info-message'>" +
+
+                escapeHtml(
+                    data.message ||
+                    "Unable to find available faculty."
+                ) +
+
+                "</div>";
 
             return;
         }
 
 
-        const facultyList =
+        const availableFaculty =
             data.faculty || [];
-
-
-        const facultyBox =
-            document.getElementById(
-                "facultyBox"
-            );
-
-
-        const facultyListDiv =
-            document.getElementById(
-                "facultyList"
-            );
 
 
         facultyListDiv.innerHTML =
             "";
 
 
-        selectedAlternateFacultyId =
-            null;
-
-
-        selectedAlternateFacultyName =
-            "";
-
-
-        document.getElementById(
-            "selectedFacultyBox"
-        ).style.display =
-            "none";
-
-
-        document.getElementById(
-            "sendRequestButton"
-        ).style.display =
-            "none";
-
+        /* =================================================
+           NO AVAILABLE FACULTY
+           ================================================= */
 
         if (
-            facultyList.length === 0
+            availableFaculty.length === 0
         ) {
+
+            facultyCount.innerHTML =
+                "0 available faculty members found.";
+
 
             facultyListDiv.innerHTML =
 
-                "<p>No eligible alternate faculty found.</p>";
+                "<div class='info-message'>" +
+
+                "No available faculty members were found " +
+
+                "in the same department for this period." +
+
+                "</div>";
 
 
-            facultyBox.style.display =
-                "block";
+            sendButton.style.display =
+                "none";
 
 
             return;
         }
 
 
-        /* =============================================
-           DISPLAY FACULTY LIST
-           ============================================= */
+        /* =================================================
+           SHOW COUNT
+           ================================================= */
 
-        facultyList.forEach(
+        facultyCount.innerHTML =
+
+            availableFaculty.length +
+
+            " available faculty member" +
+
+            (
+                availableFaculty.length > 1
+                    ? "s"
+                    : ""
+            ) +
+
+            " found in the same department.";
+
+
+        /* =================================================
+           DISPLAY ALL FACULTY
+           ================================================= */
+
+        availableFaculty.forEach(
             function(faculty) {
-
 
                 const item =
                     document.createElement(
@@ -1428,56 +1486,57 @@ async function startHandover() {
                 item.innerHTML =
 
                     "<strong>" +
+
                     escapeHtml(
                         faculty.faculty_name
                     ) +
+
                     "</strong>" +
 
-                    "<br>" +
+                    "<br><br>" +
 
-                    "Faculty Code: " +
+                    "<span>" +
+
+                    "<strong>Faculty Code:</strong> " +
+
                     escapeHtml(
                         faculty.faculty_code
                     ) +
 
+                    "</span>" +
+
                     "<br>" +
 
-                    "Email: " +
+                    "<span>" +
+
+                    "<strong>Email:</strong> " +
+
                     escapeHtml(
                         faculty.email
                     ) +
 
+                    "</span>" +
+
                     "<br>" +
 
-                    "Designation: " +
+                    "<span>" +
+
+                    "<strong>Designation:</strong> " +
+
                     escapeHtml(
                         faculty.designation ||
                         "N/A"
                     ) +
 
+                    "</span>" +
+
                     "<br>" +
 
-                    "<button " +
+                    "<span>" +
 
-                    "type='button' " +
+                    "<strong>Status:</strong> Available" +
 
-                    "class='select-btn' " +
-
-                    "onclick='selectFaculty(" +
-
-                    faculty.faculty_id +
-
-                    ", " +
-
-                    JSON.stringify(
-                        faculty.faculty_name
-                    ) +
-
-                    ")'>" +
-
-                    "SELECT" +
-
-                    "</button>";
+                    "</span>";
 
 
                 facultyListDiv.appendChild(
@@ -1488,8 +1547,13 @@ async function startHandover() {
         );
 
 
-        facultyBox.style.display =
-            "block";
+        /* =================================================
+           SHOW SEND BUTTON
+           ================================================= */
+
+        sendButton.style.display =
+            "inline-block";
+
 
     } catch (error) {
 
@@ -1499,10 +1563,18 @@ async function startHandover() {
         );
 
 
-        alert(
-            "Unable to find alternate faculty.\n\n" +
-            error.message
-        );
+        facultyListDiv.innerHTML =
+
+            "<div class='info-message'>" +
+
+            "Unable to connect to server.<br><br>" +
+
+            escapeHtml(
+                error.message
+            ) +
+
+            "</div>";
+
 
     }
 
@@ -1510,56 +1582,7 @@ async function startHandover() {
 
 
 /* =========================================================
-   SELECT FACULTY
-   ========================================================= */
-
-function selectFaculty(
-    facultyId,
-    facultyName
-) {
-
-    selectedAlternateFacultyId =
-        facultyId;
-
-
-    selectedAlternateFacultyName =
-        facultyName;
-
-
-    const selectedBox =
-        document.getElementById(
-            "selectedFacultyBox"
-        );
-
-
-    selectedBox.innerHTML =
-
-        "Selected Faculty: " +
-        escapeHtml(
-            facultyName
-        );
-
-
-    selectedBox.style.display =
-        "block";
-
-
-    document.getElementById(
-        "sendRequestButton"
-    ).style.display =
-        "inline-block";
-
-
-    alert(
-        facultyName +
-        " selected successfully."
-    );
-
-}
-
-
-/* =========================================================
-   SEND HANDOVER REQUEST
+   SEND HANDOVER REQUEST TO ALL
    ========================================================= */
 
 async function sendHandoverRequest() {
@@ -1576,12 +1599,28 @@ async function sendHandoverRequest() {
     }
 
 
+    const date =
+        document.getElementById(
+            "availabilityDate"
+        ).value;
+
+
+    if (!date) {
+
+        alert(
+            "Please select a date."
+        );
+
+        return;
+    }
+
+
     if (
-        !selectedAlternateFacultyId
+        !selectedPeriodId
     ) {
 
         alert(
-            "Please select an alternate faculty."
+            "Period information is missing."
         );
 
         return;
@@ -1607,11 +1646,19 @@ async function sendHandoverRequest() {
     }
 
 
+    const facultyCountText =
+        document.getElementById(
+            "facultyCount"
+        ).innerText;
+
+
     const confirmSend =
         confirm(
-            "Send handover request to " +
-            selectedAlternateFacultyName +
-            "?"
+
+            "Send the handover request to ALL available faculty members?\n\n" +
+
+            facultyCountText
+
         );
 
 
@@ -1621,19 +1668,33 @@ async function sendHandoverRequest() {
     }
 
 
+    const sendButton =
+        document.getElementById(
+            "sendRequestButton"
+        );
+
+
+    sendButton.disabled =
+        true;
+
+
+    sendButton.innerText =
+        "SENDING REQUESTS...";
+
+
     const formData =
         new FormData();
 
 
     formData.append(
-        "timetable_id",
-        selectedTimetableId
+        "date",
+        date
     );
 
 
     formData.append(
-        "alternate_faculty_id",
-        selectedAlternateFacultyId
+        "timetable_id",
+        selectedTimetableId
     );
 
 
@@ -1675,6 +1736,14 @@ async function sendHandoverRequest() {
 
         } catch (error) {
 
+            sendButton.disabled =
+                false;
+
+
+            sendButton.innerText =
+                "SEND HANDOVER REQUEST TO ALL";
+
+
             alert(
                 "Invalid handover response.\n\n" +
                 text
@@ -1688,36 +1757,50 @@ async function sendHandoverRequest() {
             data.success
         ) {
 
+            const requestCount =
+                data.request_count || 0;
+
+
             alert(
 
                 "Handover request sent successfully!\n\n" +
 
-                "Alternate Faculty: " +
-                data.alternate_faculty +
+                "Requests sent to " +
 
-                "\n\n" +
+                requestCount +
 
-                "Request ID: " +
-                data.request_id
+                " available faculty member" +
+
+                (
+                    requestCount !== 1
+                        ? "s."
+                        : "."
+                )
 
             );
 
 
-            const button =
-                document.getElementById(
-                    "sendRequestButton"
-                );
-
-
-            button.disabled =
+            sendButton.disabled =
                 true;
 
 
-            button.innerText =
-                "REQUEST SENT";
+            sendButton.innerText =
+                "REQUESTS SENT";
+
+
+            sendButton.style.background =
+                "#777";
 
 
         } else {
+
+            sendButton.disabled =
+                false;
+
+
+            sendButton.innerText =
+                "SEND HANDOVER REQUEST TO ALL";
+
 
             alert(
                 data.message ||
@@ -1735,9 +1818,20 @@ async function sendHandoverRequest() {
         );
 
 
+        sendButton.disabled =
+            false;
+
+
+        sendButton.innerText =
+            "SEND HANDOVER REQUEST TO ALL";
+
+
         alert(
+
             "Unable to send handover request.\n\n" +
+
             error.message
+
         );
 
     }

@@ -28,13 +28,12 @@ if (!isset($_SESSION['user_id'])) {
 
 if (
     !isset($_SESSION['role']) ||
-    $_SESSION['role'] !== 'FACULTY'
+    strtoupper($_SESSION['role']) !== 'FACULTY'
 ) {
 
     echo json_encode([
         "success" => false,
-        "message" =>
-            "Only faculty can create handover requests."
+        "message" => "Only faculty can create handover requests."
     ]);
 
     exit;
@@ -45,29 +44,59 @@ if (
    GET INPUT
    ========================================================= */
 
+$date =
+    trim($_POST['date'] ?? '');
+
 $timetable_id =
     (int) ($_POST['timetable_id'] ?? 0);
-
-$alternate_faculty_id =
-    (int) ($_POST['alternate_faculty_id'] ?? 0);
 
 $reason =
     trim($_POST['reason'] ?? '');
 
 
 /* =========================================================
-   VALIDATION
+   VALIDATE INPUT
    ========================================================= */
 
+if ($date === '') {
+
+    echo json_encode([
+        "success" => false,
+        "message" => "Date is required."
+    ]);
+
+    exit;
+}
+
+
+/* Validate date format */
+
+$date_object =
+    DateTime::createFromFormat(
+        'Y-m-d',
+        $date
+    );
+
+
 if (
-    $timetable_id <= 0 ||
-    $alternate_faculty_id <= 0
+    !$date_object ||
+    $date_object->format('Y-m-d') !== $date
 ) {
 
     echo json_encode([
         "success" => false,
-        "message" =>
-            "Timetable and alternate faculty are required."
+        "message" => "Invalid date."
+    ]);
+
+    exit;
+}
+
+
+if ($timetable_id <= 0) {
+
+    echo json_encode([
+        "success" => false,
+        "message" => "Timetable ID is required."
     ]);
 
     exit;
@@ -78,8 +107,7 @@ if ($reason === '') {
 
     echo json_encode([
         "success" => false,
-        "message" =>
-            "Handover reason is required."
+        "message" => "Handover reason is required."
     ]);
 
     exit;
@@ -87,7 +115,7 @@ if ($reason === '') {
 
 
 /* =========================================================
-   CURRENT USER
+   GET CURRENT USER
    ========================================================= */
 
 $user_id =
@@ -98,15 +126,15 @@ $user_id =
    GET ORIGINAL FACULTY
    ========================================================= */
 
-$stmt =
-    $conn->prepare("
-        SELECT
-            faculty_id,
-            faculty_name
-        FROM faculty
-        WHERE user_id = ?
-        LIMIT 1
-    ");
+$stmt = $conn->prepare("
+    SELECT
+        faculty_id,
+        faculty_name,
+        department_id
+    FROM faculty
+    WHERE user_id = ?
+    LIMIT 1
+");
 
 
 if (!$stmt) {
@@ -135,9 +163,7 @@ $result =
     $stmt->get_result();
 
 
-if (
-    $result->num_rows === 0
-) {
+if ($result->num_rows === 0) {
 
     echo json_encode([
         "success" => false,
@@ -159,30 +185,33 @@ $original_faculty_id =
     (int) $originalFaculty['faculty_id'];
 
 
+$original_department_id =
+    (int) $originalFaculty['department_id'];
+
+
 $stmt->close();
 
 
 /* =========================================================
-   CHECK TIMETABLE
+   GET TIMETABLE CLASS
    ========================================================= */
 
-$stmt =
-    $conn->prepare("
-        SELECT
-            timetable_id,
-            day,
-            period_id,
-            section_id,
-            subject_id,
-            faculty_id,
-            classroom_id,
-            status
-        FROM timetable
-        WHERE timetable_id = ?
-          AND faculty_id = ?
-          AND status = 'PUBLISHED'
-        LIMIT 1
-    ");
+$stmt = $conn->prepare("
+    SELECT
+        timetable_id,
+        day,
+        period_id,
+        section_id,
+        subject_id,
+        faculty_id,
+        classroom_id,
+        status
+    FROM timetable
+    WHERE timetable_id = ?
+      AND faculty_id = ?
+      AND status = 'PUBLISHED'
+    LIMIT 1
+");
 
 
 if (!$stmt) {
@@ -212,9 +241,7 @@ $result =
     $stmt->get_result();
 
 
-if (
-    $result->num_rows === 0
-) {
+if ($result->num_rows === 0) {
 
     echo json_encode([
         "success" => false,
@@ -236,106 +263,57 @@ $stmt->close();
 
 
 /* =========================================================
-   CHECK SELF SELECTION
+   GET CLASS INFORMATION
    ========================================================= */
 
-if (
-    $alternate_faculty_id ===
-    $original_faculty_id
-) {
+$class_day =
+    strtoupper(trim($class['day']));
 
-    echo json_encode([
-        "success" => false,
-        "message" =>
-            "You cannot select yourself."
-    ]);
 
-    exit;
-}
+$period_id =
+    (int) $class['period_id'];
 
 
 /* =========================================================
-   CHECK ALTERNATE FACULTY
+   CHECK SELECTED DATE DAY
    ========================================================= */
 
-$stmt =
-    $conn->prepare("
-        SELECT
-            f.faculty_id,
-            f.faculty_name,
-            f.email
-        FROM faculty f
-        INNER JOIN users u
-            ON u.user_id = f.user_id
-        WHERE f.faculty_id = ?
-          AND u.status = 'ACTIVE'
-        LIMIT 1
-    ");
-
-
-if (!$stmt) {
-
-    echo json_encode([
-        "success" => false,
-        "message" =>
-            "Alternate faculty query failed: " .
-            $conn->error
-    ]);
-
-    exit;
-}
-
-
-$stmt->bind_param(
-    "i",
-    $alternate_faculty_id
-);
-
-
-$stmt->execute();
-
-
-$result =
-    $stmt->get_result();
+$selected_day =
+    strtoupper(
+        date(
+            "l",
+            strtotime($date)
+        )
+    );
 
 
 if (
-    $result->num_rows === 0
+    $selected_day !== $class_day
 ) {
 
     echo json_encode([
         "success" => false,
         "message" =>
-            "Selected alternate faculty is not active."
+            "The selected date does not match the class timetable day."
     ]);
-
-    $stmt->close();
 
     exit;
 }
-
-
-$alternateFaculty =
-    $result->fetch_assoc();
-
-
-$stmt->close();
 
 
 /* =========================================================
    CHECK EXISTING HANDOVER
    ========================================================= */
 
-$stmt =
-    $conn->prepare("
-        SELECT
-            handover_id
-        FROM class_handover
-        WHERE timetable_id = ?
-          AND original_faculty_id = ?
-          AND status IN ('PENDING', 'ASSIGNED')
-        LIMIT 1
-    ");
+$stmt = $conn->prepare("
+    SELECT
+        handover_id
+    FROM class_handover
+    WHERE timetable_id = ?
+      AND original_faculty_id = ?
+      AND status IN ('PENDING', 'ASSIGNED')
+    LIMIT 1
+");
 
 
 if (!$stmt) {
@@ -365,9 +343,7 @@ $result =
     $stmt->get_result();
 
 
-if (
-    $result->num_rows > 0
-) {
+if ($result->num_rows > 0) {
 
     echo json_encode([
         "success" => false,
@@ -382,6 +358,131 @@ if (
 
 
 $stmt->close();
+
+
+/* =========================================================
+   FIND ALL ELIGIBLE FACULTIES
+   =========================================================
+
+   Conditions:
+
+   1. Faculty must be ACTIVE
+   2. Faculty must be from SAME DEPARTMENT
+   3. Faculty must not be original faculty
+   4. Faculty must be AVAILABLE for selected date/period
+      OR have no availability record
+   5. Faculty must not have a published class
+      in the same period
+   ========================================================= */
+
+
+$stmt = $conn->prepare("
+    SELECT
+        f.faculty_id,
+        f.faculty_name,
+        f.email,
+        f.user_id,
+        f.department_id
+
+    FROM faculty f
+
+    INNER JOIN users u
+        ON u.user_id = f.user_id
+
+    LEFT JOIN faculty_availability fa
+        ON fa.faculty_id = f.faculty_id
+        AND fa.availability_date = ?
+        AND fa.period_id = ?
+
+    LEFT JOIN timetable tt
+        ON tt.faculty_id = f.faculty_id
+        AND tt.day = ?
+        AND tt.period_id = ?
+        AND tt.status = 'PUBLISHED'
+
+    WHERE u.status = 'ACTIVE'
+
+      /* SAME DEPARTMENT */
+      AND f.department_id = ?
+
+      /* DO NOT INCLUDE ORIGINAL FACULTY */
+      AND f.faculty_id != ?
+
+      /* AVAILABLE OR NO AVAILABILITY RECORD */
+      AND (
+          fa.availability_id IS NULL
+          OR fa.status = 'AVAILABLE'
+      )
+
+      /* MUST NOT ALREADY HAVE A CLASS */
+      AND tt.timetable_id IS NULL
+
+    ORDER BY f.faculty_name ASC
+");
+
+
+if (!$stmt) {
+
+    echo json_encode([
+        "success" => false,
+        "message" =>
+            "Eligible faculty query failed: " .
+            $conn->error
+    ]);
+
+    exit;
+}
+
+
+$stmt->bind_param(
+    "sisiii",
+    $date,
+    $period_id,
+    $class_day,
+    $period_id,
+    $original_department_id,
+    $original_faculty_id
+);
+
+
+$stmt->execute();
+
+
+$result =
+    $stmt->get_result();
+
+
+$eligible_faculties = [];
+
+
+while (
+    $row = $result->fetch_assoc()
+) {
+
+    $eligible_faculties[] =
+        $row;
+}
+
+
+$stmt->close();
+
+
+/* =========================================================
+   NO FACULTY AVAILABLE
+   ========================================================= */
+
+if (
+    count($eligible_faculties) === 0
+) {
+
+    echo json_encode([
+        "success" => false,
+        "message" =>
+            "No available faculty members were found in the same department for this period."
+    ]);
+
+    exit;
+}
 
 
 /* =========================================================
@@ -429,9 +530,7 @@ try {
     );
 
 
-    if (
-        !$stmt->execute()
-    ) {
+    if (!$stmt->execute()) {
 
         throw new Exception(
             "Unable to create handover: " .
@@ -448,10 +547,10 @@ try {
 
 
     /* =====================================================
-       CREATE HANDOVER REQUEST
+       PREPARE REQUEST INSERT
        ===================================================== */
 
-    $stmt =
+    $request_stmt =
         $conn->prepare("
             INSERT INTO handover_requests
             (
@@ -464,115 +563,20 @@ try {
         ");
 
 
-    if (!$stmt) {
+    if (!$request_stmt) {
 
         throw new Exception(
-            "Request creation failed: " .
+            "Request preparation failed: " .
             $conn->error
         );
     }
 
 
-    $stmt->bind_param(
-        "ii",
-        $handover_id,
-        $alternate_faculty_id
-    );
-
-
-    if (
-        !$stmt->execute()
-    ) {
-
-        throw new Exception(
-            "Unable to create handover request: " .
-            $stmt->error
-        );
-    }
-
-
-    $request_id =
-        $stmt->insert_id;
-
-
-    $stmt->close();
-
-
     /* =====================================================
-       GET ALTERNATE USER ID
+       PREPARE NOTIFICATION INSERT
        ===================================================== */
 
-    $stmt =
-        $conn->prepare("
-            SELECT
-                user_id
-            FROM faculty
-            WHERE faculty_id = ?
-            LIMIT 1
-        ");
-
-
-    if (!$stmt) {
-
-        throw new Exception(
-            "Alternate user query failed: " .
-            $conn->error
-        );
-    }
-
-
-    $stmt->bind_param(
-        "i",
-        $alternate_faculty_id
-    );
-
-
-    $stmt->execute();
-
-
-    $result =
-        $stmt->get_result();
-
-
-    if (
-        $result->num_rows === 0
-    ) {
-
-        throw new Exception(
-            "Alternate faculty user was not found."
-        );
-    }
-
-
-    $alternateUser =
-        $result->fetch_assoc();
-
-
-    $alternate_user_id =
-        (int) $alternateUser['user_id'];
-
-
-    $stmt->close();
-
-
-    /* =====================================================
-       CREATE NOTIFICATION
-       ===================================================== */
-
-    $title =
-        "New Handover Request";
-
-
-    $message =
-        $originalFaculty['faculty_name'] .
-        " has sent you a class handover request.";
-
-
-    $notification_type =
-        "HANDOVER";
-
-
-    $stmt =
+    $notification_stmt =
         $conn->prepare("
             INSERT INTO notifications
             (
@@ -587,7 +591,7 @@ try {
         ");
 
 
-    if (!$stmt) {
+    if (!$notification_stmt) {
 
         throw new Exception(
             "Notification preparation failed: " .
@@ -596,27 +600,109 @@ try {
     }
 
 
-    $stmt->bind_param(
-        "isss",
-        $alternate_user_id,
-        $title,
-        $message,
-        $notification_type
-    );
+    /* =====================================================
+       SEND REQUEST TO ALL ELIGIBLE FACULTIES
+       ===================================================== */
+
+    $request_count =
+        0;
 
 
-    if (
-        !$stmt->execute()
+    $faculty_names =
+        [];
+
+
+    foreach (
+        $eligible_faculties as $faculty
     ) {
 
-        throw new Exception(
-            "Notification creation failed: " .
-            $stmt->error
+
+        $alternate_faculty_id =
+            (int) $faculty['faculty_id'];
+
+
+        $alternate_user_id =
+            (int) $faculty['user_id'];
+
+
+        $faculty_name =
+            $faculty['faculty_name'];
+
+
+        /* ---------------------------------------------
+           CREATE HANDOVER REQUEST
+           --------------------------------------------- */
+
+        $request_stmt->bind_param(
+            "ii",
+            $handover_id,
+            $alternate_faculty_id
         );
+
+
+        if (!$request_stmt->execute()) {
+
+            throw new Exception(
+                "Unable to create request for " .
+                $faculty_name .
+                ": " .
+                $request_stmt->error
+            );
+        }
+
+
+        $request_count++;
+
+
+        $faculty_names[] =
+            $faculty_name;
+
+
+        /* ---------------------------------------------
+           CREATE NOTIFICATION
+           --------------------------------------------- */
+
+        $title =
+            "New Handover Request";
+
+
+        $message =
+            $originalFaculty['faculty_name'] .
+            " has sent you a class handover request. " .
+            "You can accept or reject it.";
+
+
+        $notification_type =
+            "HANDOVER";
+
+
+        $notification_stmt->bind_param(
+            "isss",
+            $alternate_user_id,
+            $title,
+            $message,
+            $notification_type
+        );
+
+
+        if (
+            !$notification_stmt->execute()
+        ) {
+
+            throw new Exception(
+                "Notification creation failed for " .
+                $faculty_name .
+                ": " .
+                $notification_stmt->error
+            );
+        }
+
     }
 
 
-    $stmt->close();
+    $request_stmt->close();
+
+    $notification_stmt->close();
 
 
     /* =====================================================
@@ -626,21 +712,25 @@ try {
     $conn->commit();
 
 
+    /* =====================================================
+       SUCCESS RESPONSE
+       ===================================================== */
+
     echo json_encode([
 
         "success" => true,
 
         "message" =>
-            "Handover request sent successfully.",
+            "Handover request sent to all available faculty members in the same department.",
 
         "handover_id" =>
             $handover_id,
 
-        "request_id" =>
-            $request_id,
+        "request_count" =>
+            $request_count,
 
-        "alternate_faculty" =>
-            $alternateFaculty['faculty_name']
+        "faculty_names" =>
+            $faculty_names
 
     ]);
 

@@ -619,45 +619,31 @@ $firstLetter = strtoupper(
         </div>
 
 
-        <ul class="menu">
+    
 
-            <li>
+           <ul class="menu">
 
-                <a href="dashboard.php">
-                    🏠 Dashboard
-                </a>
+    <li>
+        <a href="dashboard.php">🏠 Dashboard</a>
+    </li>
 
-            </li>
+    <li>
+        <a href="timetable.php">📅 Timetable</a>
+    </li>
 
+    <li>
+        <a href="attendance.php" class="active">📊 Attendance</a>
+    </li>
 
-            <li>
+    <li>
+        <a href="announcements.php">📢 Announcements</a>
+    </li>
 
-                <a href="timetable.php">
-                    📅 Timetable
-                </a>
-
-            </li>
-
-
-            <li>
-
-                <a
-                    href="attendance.php"
-                    class="active"
-                >
-                    📊 Attendance
-                </a>
-
-            </li>
+    <li>
+        <a href="profile.php">👤 Profile</a>
+    </li>
 
 
-            <li>
-
-                <a href="profile.php">
-                    👤 Profile
-                </a>
-
-            </li>
 
         </ul>
 

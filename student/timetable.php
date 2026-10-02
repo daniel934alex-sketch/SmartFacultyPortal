@@ -13,11 +13,9 @@ if ($username === '') {
 }
 
 
-/*
-|--------------------------------------------------------------------------
-| Get logged-in student's details
-|--------------------------------------------------------------------------
-*/
+/* =========================================================
+   GET STUDENT DETAILS
+========================================================= */
 
 $studentSql = "
     SELECT
@@ -58,27 +56,75 @@ $student = $studentResult->fetch_assoc();
 
 $studentStmt->close();
 
-
-$studentName = $student['student_name'];
+$studentName    = $student['student_name'];
 $registerNumber = $student['register_number'];
-$sectionId = (int) $student['section_id'];
-$sectionName = $student['section_name'];
+$sectionId      = (int)$student['section_id'];
+$sectionName    = $student['section_name'];
 
 $firstLetter = strtoupper(
     substr(trim($studentName), 0, 1)
 );
 
 
-/*
-|--------------------------------------------------------------------------
-| Get published timetable for student's section
-|--------------------------------------------------------------------------
-*/
+/* =========================================================
+   DAYS
+========================================================= */
+
+$days = [
+    'MONDAY',
+    'TUESDAY',
+    'WEDNESDAY',
+    'THURSDAY',
+    'FRIDAY',
+    'SATURDAY'
+];
+
+
+/* =========================================================
+   GET ALL PERIODS
+========================================================= */
+
+$periodSql = "
+    SELECT
+        period_id,
+        period_number,
+        start_time,
+        end_time
+    FROM periods
+    ORDER BY period_number
+";
+
+$periodStmt = $conn->prepare($periodSql);
+
+if (!$periodStmt) {
+    die("Period query preparation failed.");
+}
+
+$periodStmt->execute();
+
+$periodResult = $periodStmt->get_result();
+
+$periods = [];
+
+while ($periodRow = $periodResult->fetch_assoc()) {
+
+    $periodNumber = (int)$periodRow['period_number'];
+
+    $periods[$periodNumber] = $periodRow;
+}
+
+$periodStmt->close();
+
+
+/* =========================================================
+   GET PUBLISHED TIMETABLE
+========================================================= */
 
 $timetableSql = "
     SELECT
         t.timetable_id,
         t.day,
+        t.period_id,
         t.status,
 
         p.period_number,
@@ -123,7 +169,6 @@ $timetableSql = "
         p.period_number
 ";
 
-
 $timetableStmt = $conn->prepare($timetableSql);
 
 if (!$timetableStmt) {
@@ -131,46 +176,40 @@ if (!$timetableStmt) {
 }
 
 $timetableStmt->bind_param("i", $sectionId);
+
 $timetableStmt->execute();
 
 $timetableResult = $timetableStmt->get_result();
 
 
-/*
-|--------------------------------------------------------------------------
-| Store timetable grouped by day
-|--------------------------------------------------------------------------
-*/
+/* =========================================================
+   STORE TIMETABLE BY DAY + PERIOD
+========================================================= */
 
-$timetable = [
-    'MONDAY' => [],
-    'TUESDAY' => [],
-    'WEDNESDAY' => [],
-    'THURSDAY' => [],
-    'FRIDAY' => [],
-    'SATURDAY' => []
-];
+$timetable = [];
 
+foreach ($days as $day) {
+    $timetable[$day] = [];
+}
 
 while ($row = $timetableResult->fetch_assoc()) {
 
-    if (isset($timetable[$row['day']])) {
+    $day = strtoupper($row['day']);
 
-        $timetable[$row['day']][] = $row;
+    $periodNumber = (int)$row['period_number'];
 
+    if (isset($timetable[$day])) {
+
+        $timetable[$day][$periodNumber] = $row;
     }
-
 }
-
 
 $timetableStmt->close();
 
 
-/*
-|--------------------------------------------------------------------------
-| Check whether timetable exists
-|--------------------------------------------------------------------------
-*/
+/* =========================================================
+   CHECK TIMETABLE
+========================================================= */
 
 $hasTimetable = false;
 
@@ -182,434 +221,612 @@ foreach ($timetable as $dayRows) {
 
         break;
     }
-
 }
 
 ?>
 
 <!DOCTYPE html>
+
 <html lang="en">
 
 <head>
 
-    <meta charset="UTF-8">
+<meta charset="UTF-8">
 
-    <meta
-        name="viewport"
-        content="width=device-width, initial-scale=1.0"
-    >
+<meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0"
+>
 
-    <title>
-        Student Timetable | Smart Faculty Portal
-    </title>
+<title>
+    Student Timetable | Smart Faculty Portal
+</title>
 
 
-    <style>
+<style>
 
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-            font-family: Arial, Helvetica, sans-serif;
-        }
+/* =========================================================
+   RESET
+========================================================= */
 
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
 
-        body {
-            background: #f4f6f9;
-            color: #222;
-        }
+    font-family:
+        Arial,
+        Helvetica,
+        sans-serif;
+}
 
 
-        /* =====================================================
-           SIDEBAR
-        ====================================================== */
+/* =========================================================
+   BODY
+========================================================= */
 
-        .sidebar {
-            position: fixed;
+body {
 
-            left: 0;
-            top: 0;
+    background: #f4f6f9;
 
-            width: 240px;
-            height: 100vh;
+    color: #222;
+}
 
-            background: #151a2d;
 
-            padding: 25px 15px;
-        }
+/* =========================================================
+   SIDEBAR
+========================================================= */
 
+.sidebar {
 
-        .logo {
-            color: white;
+    position: fixed;
 
-            font-size: 21px;
+    left: 0;
+    top: 0;
 
-            font-weight: bold;
+    width: 240px;
+    height: 100vh;
 
-            text-align: center;
+    background: #151a2d;
 
-            margin-bottom: 35px;
-        }
+    padding: 25px 15px;
+}
 
 
-        .menu {
-            list-style: none;
-        }
+.logo {
 
+    color: white;
 
-        .menu li {
-            margin-bottom: 8px;
-        }
+    font-size: 21px;
 
+    font-weight: bold;
 
-        .menu a {
-            display: block;
+    text-align: center;
 
-            padding: 13px 15px;
+    margin-bottom: 35px;
+}
 
-            color: #d7d9e0;
 
-            text-decoration: none;
+.menu {
 
-            border-radius: 8px;
+    list-style: none;
+}
 
-            transition: 0.2s;
-        }
 
+.menu li {
 
-        .menu a:hover,
-        .menu a.active {
-            background: #252d4d;
+    margin-bottom: 8px;
+}
 
-            color: white;
-        }
 
+.menu a {
 
-        .logout {
-            position: absolute;
+    display: block;
 
-            bottom: 25px;
+    padding: 13px 15px;
 
-            left: 15px;
-            right: 15px;
-        }
+    color: #d7d9e0;
 
+    text-decoration: none;
 
-        .logout a {
-            display: block;
+    border-radius: 8px;
 
-            text-align: center;
+    transition: 0.2s;
+}
 
-            padding: 12px;
 
-            background: #dc3545;
+.menu a:hover,
+.menu a.active {
 
-            color: white;
+    background: #252d4d;
 
-            text-decoration: none;
+    color: white;
+}
 
-            border-radius: 8px;
 
-            transition: 0.2s;
-        }
+/* =========================================================
+   LOGOUT
+========================================================= */
 
+.logout {
 
-        .logout a:hover {
-            background: #c82333;
-        }
+    position: absolute;
 
+    bottom: 25px;
 
-        /* =====================================================
-           MAIN
-        ====================================================== */
+    left: 15px;
+    right: 15px;
+}
 
-        .main {
-            margin-left: 240px;
 
-            min-height: 100vh;
-        }
+.logout a {
 
+    display: block;
 
-        /* =====================================================
-           TOPBAR
-        ====================================================== */
+    text-align: center;
 
-        .topbar {
-            height: 70px;
+    padding: 12px;
 
-            background: white;
+    background: #dc3545;
 
-            display: flex;
+    color: white;
 
-            justify-content: space-between;
+    text-decoration: none;
 
-            align-items: center;
+    border-radius: 8px;
 
-            padding: 0 30px;
+    transition: 0.2s;
+}
 
-            border-bottom: 1px solid #ddd;
-        }
 
+.logout a:hover {
 
-        .topbar h2 {
-            font-size: 22px;
-        }
+    background: #c82333;
+}
 
 
-        .student-info {
-            display: flex;
+/* =========================================================
+   MAIN
+========================================================= */
 
-            align-items: center;
+.main {
 
-            gap: 10px;
+    margin-left: 240px;
 
-            font-size: 14px;
-        }
+    min-height: 100vh;
+}
 
 
-        .avatar {
-            width: 38px;
-            height: 38px;
+/* =========================================================
+   TOP BAR
+========================================================= */
 
-            border-radius: 50%;
+.topbar {
 
-            background: #151a2d;
+    height: 70px;
 
-            color: white;
+    background: white;
 
-            display: flex;
+    display: flex;
 
-            align-items: center;
+    justify-content: space-between;
 
-            justify-content: center;
+    align-items: center;
 
-            font-weight: bold;
-        }
+    padding: 0 30px;
 
+    border-bottom: 1px solid #ddd;
+}
 
-        /* =====================================================
-           CONTENT
-        ====================================================== */
 
-        .content {
-            padding: 30px;
-        }
+.topbar h2 {
 
+    font-size: 22px;
+}
 
-        .page-heading {
-            margin-bottom: 20px;
-        }
 
+.student-info {
 
-        .page-heading h1 {
-            font-size: 28px;
+    display: flex;
 
-            margin-bottom: 8px;
-        }
+    align-items: center;
 
+    gap: 10px;
 
-        .page-heading p {
-            color: #666;
-        }
+    font-size: 14px;
+}
 
 
-        .student-summary {
-            display: inline-flex;
+.avatar {
 
-            align-items: center;
+    width: 38px;
+    height: 38px;
 
-            padding: 9px 15px;
+    border-radius: 50%;
 
-            background: white;
+    background: #151a2d;
 
-            border-radius: 20px;
+    color: white;
 
-            margin-bottom: 25px;
+    display: flex;
 
-            color: #555;
+    align-items: center;
 
-            font-size: 13px;
+    justify-content: center;
 
-            box-shadow:
-                0 2px 6px rgba(0, 0, 0, 0.04);
-        }
+    font-weight: bold;
+}
 
 
-        /* =====================================================
-           DAY CARD
-        ====================================================== */
+/* =========================================================
+   CONTENT
+========================================================= */
 
-        .day-card {
-            background: white;
+.content {
 
-            border-radius: 12px;
+    padding: 30px;
+}
 
-            padding: 25px;
 
-            margin-bottom: 25px;
+.page-heading {
 
-            box-shadow:
-                0 2px 8px rgba(0, 0, 0, 0.06);
-        }
+    margin-bottom: 20px;
+}
 
 
-        .day-title {
-            font-size: 20px;
+.page-heading h1 {
 
-            font-weight: bold;
+    font-size: 28px;
 
-            margin-bottom: 20px;
-        }
+    margin-bottom: 8px;
+}
 
 
-        /* =====================================================
-           TABLE
-        ====================================================== */
+.page-heading p {
 
-        .table-container {
-            overflow-x: auto;
-        }
+    color: #666;
+}
 
 
-        table {
-            width: 100%;
+/* =========================================================
+   STUDENT SUMMARY
+========================================================= */
 
-            border-collapse: collapse;
+.student-summary {
 
-            min-width: 800px;
-        }
+    display: inline-flex;
 
+    align-items: center;
 
-        th,
-        td {
-            padding: 14px;
+    padding: 9px 15px;
 
-            text-align: left;
+    background: white;
 
-            border-bottom: 1px solid #eee;
-        }
+    border-radius: 20px;
 
+    margin-bottom: 25px;
 
-        th {
-            background: #f7f8fa;
+    color: #555;
 
-            font-size: 14px;
-        }
+    font-size: 13px;
 
+    box-shadow:
+        0 2px 6px rgba(0,0,0,0.04);
+}
 
-        td {
-            font-size: 14px;
-        }
 
+/* =========================================================
+   DAY CARD
+========================================================= */
 
-        .period {
-            font-weight: bold;
-        }
+.day-card {
 
+    background: white;
 
-        .subject-code {
-            font-weight: bold;
-        }
+    border-radius: 12px;
 
+    padding: 25px;
 
-        .subject-name {
-            color: #666;
+    margin-bottom: 25px;
 
-            font-size: 12px;
+    box-shadow:
+        0 2px 8px rgba(0,0,0,0.06);
+}
 
-            margin-top: 4px;
-        }
 
+.day-title {
 
-        .room-type {
-            color: #777;
+    font-size: 20px;
 
-            font-size: 12px;
+    font-weight: bold;
 
-            margin-top: 4px;
-        }
+    margin-bottom: 20px;
+}
 
 
-        /* =====================================================
-           EMPTY STATE
-        ====================================================== */
+/* =========================================================
+   TABLE CONTAINER
+========================================================= */
 
-        .empty-state {
-            background: white;
+.table-container {
 
-            padding: 60px 20px;
+    width: 100%;
 
-            border-radius: 12px;
+    overflow-x: auto;
+}
 
-            text-align: center;
 
-            box-shadow:
-                0 2px 8px rgba(0, 0, 0, 0.06);
-        }
+/* =========================================================
+   TABLE
+========================================================= */
 
+table {
 
-        .empty-icon {
-            font-size: 45px;
+    width: 100%;
 
-            margin-bottom: 15px;
-        }
+    border-collapse: collapse;
 
+    table-layout: fixed;
 
-        .empty-state h3 {
-            margin-bottom: 8px;
+    min-width: 900px;
+}
 
-            font-size: 19px;
-        }
 
+/* =========================================================
+   COLUMN WIDTHS
+========================================================= */
 
-        .empty-state p {
-            color: #777;
+th:nth-child(1),
+td:nth-child(1) {
 
-            font-size: 14px;
+    width: 9%;
+}
 
-            line-height: 1.5;
-        }
 
+th:nth-child(2),
+td:nth-child(2) {
 
-        /* =====================================================
-           MOBILE
-        ====================================================== */
+    width: 18%;
+}
 
-        @media (max-width: 650px) {
 
-            .sidebar {
-                position: relative;
+th:nth-child(3),
+td:nth-child(3) {
 
-                width: 100%;
+    width: 30%;
+}
 
-                height: auto;
-            }
 
+th:nth-child(4),
+td:nth-child(4) {
 
-            .main {
-                margin-left: 0;
-            }
+    width: 25%;
+}
 
 
-            .logout {
-                position: static;
+th:nth-child(5),
+td:nth-child(5) {
 
-                margin-top: 20px;
-            }
+    width: 18%;
+}
 
 
-            .topbar {
-                padding: 0 15px;
-            }
+/* =========================================================
+   TABLE CELLS
+========================================================= */
 
+th,
+td {
 
-            .content {
-                padding: 15px;
-            }
+    padding: 14px 12px;
 
-        }
+    text-align: left;
 
-    </style>
+    border-bottom: 1px solid #eee;
+
+    vertical-align: middle;
+}
+
+
+th {
+
+    background: #f7f8fa;
+
+    font-size: 14px;
+
+    font-weight: 600;
+
+    color: #222;
+}
+
+
+td {
+
+    font-size: 14px;
+
+    color: #222;
+}
+
+
+/* =========================================================
+   PERIOD
+========================================================= */
+
+.period {
+
+    font-weight: bold;
+
+    white-space: nowrap;
+}
+
+
+/* =========================================================
+   TIME
+========================================================= */
+
+.time {
+
+    white-space: nowrap;
+
+    font-size: 13px;
+}
+
+
+/* =========================================================
+   SUBJECT
+========================================================= */
+
+.subject-code {
+
+    font-weight: bold;
+
+    font-size: 14px;
+
+    line-height: 1.3;
+}
+
+
+.subject-name {
+
+    color: #666;
+
+    font-size: 12px;
+
+    margin-top: 4px;
+
+    line-height: 1.3;
+}
+
+
+/* =========================================================
+   FACULTY
+========================================================= */
+
+.faculty {
+
+    white-space: nowrap;
+}
+
+
+/* =========================================================
+   ROOM
+========================================================= */
+
+.room {
+
+    white-space: nowrap;
+
+    font-weight: 500;
+}
+
+
+.room-type {
+
+    color: #777;
+
+    font-size: 11px;
+
+    margin-top: 4px;
+
+    text-transform: uppercase;
+}
+
+
+/* =========================================================
+   EMPTY STATE
+========================================================= */
+
+.empty-state {
+
+    background: white;
+
+    padding: 60px 20px;
+
+    border-radius: 12px;
+
+    text-align: center;
+
+    box-shadow:
+        0 2px 8px rgba(0,0,0,0.06);
+}
+
+
+.empty-icon {
+
+    font-size: 45px;
+
+    margin-bottom: 15px;
+}
+
+
+.empty-state h3 {
+
+    margin-bottom: 8px;
+
+    font-size: 19px;
+}
+
+
+.empty-state p {
+
+    color: #777;
+
+    font-size: 14px;
+
+    line-height: 1.5;
+}
+
+
+/* =========================================================
+   MOBILE
+========================================================= */
+
+@media (max-width: 800px) {
+
+    .sidebar {
+
+        position: relative;
+
+        width: 100%;
+
+        height: auto;
+    }
+
+
+    .main {
+
+        margin-left: 0;
+    }
+
+
+    .logout {
+
+        position: static;
+
+        margin-top: 20px;
+    }
+
+
+    .topbar {
+
+        padding: 0 15px;
+    }
+
+
+    .content {
+
+        padding: 15px;
+    }
+
+
+    .day-card {
+
+        padding: 15px;
+    }
+
+}
+
+</style>
 
 </head>
 
@@ -617,363 +834,463 @@ foreach ($timetable as $dayRows) {
 <body>
 
 
-    <!-- =====================================================
-         SIDEBAR
-    ====================================================== -->
+<!-- =====================================================
+     SIDEBAR
+====================================================== -->
 
-    <aside class="sidebar">
-
-
-        <div class="logo">
-            Smart Faculty Portal
-        </div>
+<aside class="sidebar">
 
 
-        <ul class="menu">
+    <div class="logo">
+
+        Smart Faculty Portal
+
+    </div>
 
 
-            <li>
-
-                <a href="dashboard.php">
-                    🏠 Dashboard
-                </a>
-
-            </li>
+    <ul class="menu">
 
 
-            <li>
+        <li>
 
-                <a
-                    href="timetable.php"
-                    class="active"
-                >
-                    📅 Timetable
-                </a>
+            <a href="dashboard.php">
 
-            </li>
+                🏠 Dashboard
 
-
-            <li>
-
-                <a href="attendance.php">
-                    📊 Attendance
-                </a>
-
-            </li>
-
-
-            <li>
-
-                <a href="profile.php">
-                    👤 Profile
-                </a>
-
-            </li>
-
-
-        </ul>
-
-
-        <div class="logout">
-
-            <a href="../auth/logout.php">
-                Logout
             </a>
 
-        </div>
+        </li>
 
 
-    </aside>
+        <li>
+
+            <a
+                href="timetable.php"
+                class="active"
+            >
+
+                📅 Timetable
+
+            </a>
+
+        </li>
 
 
-    <!-- =====================================================
-         MAIN
-    ====================================================== -->
+        <li>
 
-    <main class="main">
+            <a href="attendance.php">
 
+                📊 Attendance
 
-        <!-- TOPBAR -->
+            </a>
 
-        <header class="topbar">
-
-
-            <h2>
-                Student Timetable
-            </h2>
+        </li>
 
 
-            <div class="student-info">
+        <li>
+
+            <a href="announcements.php">
+
+                📢 Announcements
+
+            </a>
+
+        </li>
 
 
-                <div class="avatar">
+        <li>
 
-                    <?= htmlspecialchars($firstLetter) ?>
+            <a href="profile.php">
 
-                </div>
+                👤 Profile
+
+            </a>
+
+        </li>
 
 
-                <span>
+    </ul>
 
-                    <?= htmlspecialchars($username) ?>
 
-                </span>
+    <div class="logout">
 
+        <a href="../auth/logout.php">
+
+            Logout
+
+        </a>
+
+    </div>
+
+
+</aside>
+
+
+
+<!-- =====================================================
+     MAIN
+====================================================== -->
+
+<main class="main">
+
+
+    <!-- TOP BAR -->
+
+    <header class="topbar">
+
+
+        <h2>
+
+            Student Timetable
+
+        </h2>
+
+
+        <div class="student-info">
+
+
+            <div class="avatar">
+
+                <?= htmlspecialchars($firstLetter) ?>
 
             </div>
 
 
-        </header>
+            <span>
+
+                <?= htmlspecialchars($username) ?>
+
+            </span>
 
 
-        <!-- =================================================
-             CONTENT
-        ================================================== -->
-
-        <div class="content">
+        </div>
 
 
-            <div class="page-heading">
+    </header>
 
-                <h1>
-                    📅 Weekly Timetable
-                </h1>
+
+
+    <!-- =================================================
+         CONTENT
+    ================================================== -->
+
+    <div class="content">
+
+
+        <div class="page-heading">
+
+
+            <h1>
+
+                📅 Weekly Timetable
+
+            </h1>
+
+
+            <p>
+
+                View the published timetable for your section.
+
+            </p>
+
+
+        </div>
+
+
+
+        <!-- STUDENT INFO -->
+
+        <div class="student-summary">
+
+            👤
+
+            <?= htmlspecialchars($studentName) ?>
+
+            &nbsp;·&nbsp;
+
+            <?= htmlspecialchars($sectionName) ?>
+
+            &nbsp;·&nbsp;
+
+            Register No:
+
+            <?= htmlspecialchars($registerNumber) ?>
+
+        </div>
+
+
+
+        <?php if (!$hasTimetable): ?>
+
+
+            <!-- EMPTY STATE -->
+
+            <div class="empty-state">
+
+
+                <div class="empty-icon">
+
+                    📅
+
+                </div>
+
+
+                <h3>
+
+                    Timetable not published yet
+
+                </h3>
 
 
                 <p>
-                    View the published timetable for your section.
+
+                    The timetable for
+
+                    <strong>
+
+                        <?= htmlspecialchars($sectionName) ?>
+
+                    </strong>
+
+                    will appear here once it is published
+                    by the administrator.
+
                 </p>
 
-            </div>
-
-
-            <!-- STUDENT INFO -->
-
-            <div class="student-summary">
-
-                👤
-
-                <?= htmlspecialchars($studentName) ?>
-
-                &nbsp;·&nbsp;
-
-                <?= htmlspecialchars($sectionName) ?>
-
-                &nbsp;·&nbsp;
-
-                Register No:
-
-                <?= htmlspecialchars($registerNumber) ?>
 
             </div>
 
 
-            <?php if (!$hasTimetable): ?>
+        <?php else: ?>
 
 
-                <!-- EMPTY STATE -->
+            <!-- =================================================
+                 ALL DAYS
+            ================================================== -->
 
-                <div class="empty-state">
+            <?php foreach ($days as $day): ?>
 
 
-                    <div class="empty-icon">
-                        📅
+                <div class="day-card">
+
+
+                    <div class="day-title">
+
+                        <?= htmlspecialchars($day) ?>
+
                     </div>
 
 
-                    <h3>
-                        Timetable not published yet
-                    </h3>
+                    <div class="table-container">
 
 
-                    <p>
+                        <table>
 
-                        The timetable for
 
-                        <strong>
-                            <?= htmlspecialchars($sectionName) ?>
-                        </strong>
+                            <thead>
 
-                        will appear here once it is published
-                        by the administrator.
+                                <tr>
 
-                    </p>
+                                    <th>
+                                        Period
+                                    </th>
+
+                                    <th>
+                                        Time
+                                    </th>
+
+                                    <th>
+                                        Subject
+                                    </th>
+
+                                    <th>
+                                        Regular Faculty
+                                    </th>
+
+                                    <th>
+                                        Room
+                                    </th>
+
+                                </tr>
+
+                            </thead>
+
+
+                            <tbody>
+
+
+                                <?php
+
+                                /*
+                                -----------------------------------------
+                                ALWAYS SHOW P1 TO P9
+                                -----------------------------------------
+                                */
+
+                                for (
+                                    $periodNumber = 1;
+                                    $periodNumber <= 9;
+                                    $periodNumber++
+                                ):
+
+                                    $row =
+                                        $timetable[$day][$periodNumber]
+                                        ?? null;
+
+
+                                    $periodInfo =
+                                        $periods[$periodNumber]
+                                        ?? null;
+
+
+                                    $startTime =
+                                        $row['start_time']
+                                        ?? ($periodInfo['start_time'] ?? '-');
+
+
+                                    $endTime =
+                                        $row['end_time']
+                                        ?? ($periodInfo['end_time'] ?? '-');
+
+                                ?>
+
+
+                                    <tr>
+
+
+                                        <!-- PERIOD -->
+
+                                        <td class="period">
+
+                                            P<?= $periodNumber ?>
+
+                                        </td>
+
+
+                                        <!-- TIME -->
+
+                                        <td class="time">
+
+                                            <?= htmlspecialchars($startTime) ?>
+
+                                            -
+
+                                            <?= htmlspecialchars($endTime) ?>
+
+                                        </td>
+
+
+
+                                        <?php if ($row): ?>
+
+
+                                            <!-- SUBJECT -->
+
+                                            <td>
+
+                                                <div class="subject-code">
+
+                                                    <?= htmlspecialchars(
+                                                        $row['subject_code']
+                                                    ) ?>
+
+                                                </div>
+
+
+                                                <div class="subject-name">
+
+                                                    <?= htmlspecialchars(
+                                                        $row['subject_name']
+                                                    ) ?>
+
+                                                </div>
+
+                                            </td>
+
+
+                                            <!-- FACULTY -->
+
+                                            <td class="faculty">
+
+                                                <?= htmlspecialchars(
+                                                    $row['faculty_name']
+                                                ) ?>
+
+                                            </td>
+
+
+                                            <!-- ROOM -->
+
+                                            <td class="room">
+
+                                                <?= htmlspecialchars(
+                                                    $row['room_number']
+                                                ) ?>
+
+
+                                                <div class="room-type">
+
+                                                    <?= htmlspecialchars(
+                                                        $row['room_type']
+                                                    ) ?>
+
+                                                </div>
+
+                                            </td>
+
+
+                                        <?php else: ?>
+
+
+                                            <!--
+                                            Normally this should never happen
+                                            because our database has 270 rows.
+                                            -->
+
+                                            <td>
+                                                —
+                                            </td>
+
+                                            <td>
+                                                —
+                                            </td>
+
+                                            <td>
+                                                —
+                                            </td>
+
+
+                                        <?php endif; ?>
+
+
+                                    </tr>
+
+
+                                <?php endfor; ?>
+
+
+                            </tbody>
+
+
+                        </table>
+
+
+                    </div>
 
 
                 </div>
 
 
-            <?php else: ?>
+            <?php endforeach; ?>
 
 
-                <!-- =================================================
-                     DAYS
-                ================================================== -->
+        <?php endif; ?>
 
-                <?php foreach ($timetable as $day => $rows): ?>
 
+    </div>
 
-                    <?php if (count($rows) > 0): ?>
 
-
-                        <div class="day-card">
-
-
-                            <div class="day-title">
-
-                                <?= htmlspecialchars($day) ?>
-
-                            </div>
-
-
-                            <div class="table-container">
-
-
-                                <table>
-
-
-                                    <thead>
-
-                                        <tr>
-
-                                            <th>
-                                                Period
-                                            </th>
-
-                                            <th>
-                                                Time
-                                            </th>
-
-                                            <th>
-                                                Subject
-                                            </th>
-
-                                            <th>
-                                                Regular Faculty
-                                            </th>
-
-                                            <th>
-                                                Room
-                                            </th>
-
-                                        </tr>
-
-                                    </thead>
-
-
-                                    <tbody>
-
-
-                                        <?php foreach ($rows as $row): ?>
-
-
-                                            <tr>
-
-
-                                                <td class="period">
-
-                                                    P<?= htmlspecialchars(
-                                                        $row['period_number']
-                                                    ) ?>
-
-                                                </td>
-
-
-                                                <td>
-
-                                                    <?= htmlspecialchars(
-                                                        $row['start_time']
-                                                    ) ?>
-
-                                                    -
-
-                                                    <?= htmlspecialchars(
-                                                        $row['end_time']
-                                                    ) ?>
-
-                                                </td>
-
-
-                                                <td>
-
-                                                    <div class="subject-code">
-
-                                                        <?= htmlspecialchars(
-                                                            $row['subject_code']
-                                                        ) ?>
-
-                                                    </div>
-
-
-                                                    <div class="subject-name">
-
-                                                        <?= htmlspecialchars(
-                                                            $row['subject_name']
-                                                        ) ?>
-
-                                                    </div>
-
-                                                </td>
-
-
-                                                <td>
-
-                                                    <?= htmlspecialchars(
-                                                        $row['faculty_name']
-                                                    ) ?>
-
-                                                </td>
-
-
-                                                <td>
-
-                                                    <?= htmlspecialchars(
-                                                        $row['room_number']
-                                                    ) ?>
-
-
-                                                    <div class="room-type">
-
-                                                        <?= htmlspecialchars(
-                                                            $row['room_type']
-                                                        ) ?>
-
-                                                    </div>
-
-                                                </td>
-
-
-                                            </tr>
-
-
-                                        <?php endforeach; ?>
-
-
-                                    </tbody>
-
-
-                                </table>
-
-
-                            </div>
-
-
-                        </div>
-
-
-                    <?php endif; ?>
-
-
-                <?php endforeach; ?>
-
-
-            <?php endif; ?>
-
-
-        </div>
-
-
-    </main>
+</main>
 
 
 </body>

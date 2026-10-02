@@ -1,4 +1,5 @@
 <?php
+date_default_timezone_set('Asia/Kolkata');
 
 require_once "../includes/auth-check.php";
 require_once "../includes/role-check.php";
@@ -11,6 +12,7 @@ $username = $_SESSION['username'] ?? '';
 if ($username === '') {
     die("Student session not found.");
 }
+
 
 /*
 |--------------------------------------------------------------------------
@@ -74,6 +76,8 @@ $studentName = $student['student_name'];
 
 $registerNumber = $student['register_number'];
 
+$sectionId = (int) $student['section_id'];
+
 $sectionName = $student['section_name'];
 
 $firstLetter = strtoupper(
@@ -83,7 +87,7 @@ $firstLetter = strtoupper(
 
 /*
 |--------------------------------------------------------------------------
-| Get student's attendance summary
+| Attendance summary
 |--------------------------------------------------------------------------
 */
 
@@ -148,12 +152,186 @@ if ($totalAttendanceClasses > 0) {
     $attendancePercentage = null;
 
     $attendanceDisplay = 'N/A';
+}
 
+
+/*
+|--------------------------------------------------------------------------
+| Get today's day
+|--------------------------------------------------------------------------
+*/
+
+$todayDay = strtoupper(
+    date('l')
+);
+
+
+/*
+|--------------------------------------------------------------------------
+| Get today's timetable
+|--------------------------------------------------------------------------
+*/
+
+$todaySql = "
+    SELECT
+        t.timetable_id,
+        t.day,
+        t.period_id,
+        t.status,
+
+        p.period_number,
+        p.start_time,
+        p.end_time,
+
+        sub.subject_code,
+        sub.subject_name,
+
+        f.faculty_name,
+
+        c.room_number,
+        c.room_type
+
+    FROM timetable t
+
+    INNER JOIN periods p
+        ON p.period_id = t.period_id
+
+    INNER JOIN subjects sub
+        ON sub.subject_id = t.subject_id
+
+    INNER JOIN faculty f
+        ON f.faculty_id = t.faculty_id
+
+    INNER JOIN classrooms c
+        ON c.classroom_id = t.classroom_id
+
+    WHERE t.section_id = ?
+      AND t.day = ?
+      AND t.status = 'PUBLISHED'
+
+    ORDER BY p.period_number
+";
+
+$todayStmt = $conn->prepare($todaySql);
+
+if (!$todayStmt) {
+    die("Today's timetable query preparation failed.");
+}
+
+$todayStmt->bind_param(
+    "is",
+    $sectionId,
+    $todayDay
+);
+
+$todayStmt->execute();
+
+$todayResult = $todayStmt->get_result();
+
+
+/*
+|--------------------------------------------------------------------------
+| Store today's classes
+|--------------------------------------------------------------------------
+*/
+
+$todayClasses = [];
+
+while ($row = $todayResult->fetch_assoc()) {
+
+    $todayClasses[] = $row;
+}
+
+$todayStmt->close();
+
+
+/*
+|--------------------------------------------------------------------------
+| Today's class count
+|--------------------------------------------------------------------------
+*/
+
+$todayClassCount = count($todayClasses);
+
+
+/*
+|--------------------------------------------------------------------------
+| Find next class
+|--------------------------------------------------------------------------
+|
+| Compare current time with period start/end time.
+|--------------------------------------------------------------------------
+*/
+
+$currentTime = date('H:i:s');
+
+$nextClass = null;
+
+foreach ($todayClasses as $class) {
+
+    $startTime = $class['start_time'];
+
+    $endTime = $class['end_time'];
+
+    if ($currentTime < $endTime) {
+
+        $nextClass = $class;
+
+        break;
+    }
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| Next class display
+|--------------------------------------------------------------------------
+*/
+
+if ($nextClass !== null) {
+
+    $nextClassPeriod =
+        'P' . $nextClass['period_number'];
+
+    $nextClassSubject =
+        $nextClass['subject_code'];
+
+} else {
+
+    $nextClassPeriod = '—';
+
+    $nextClassSubject = 'No more classes';
+
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| Helper function for class status
+|--------------------------------------------------------------------------
+*/
+
+function getClassStatus($startTime, $endTime)
+{
+    $currentTime = date('H:i:s');
+
+    if ($currentTime >= $endTime) {
+
+        return 'Completed';
+    }
+
+    if ($currentTime >= $startTime) {
+
+        return 'Ongoing';
+    }
+
+    return 'Upcoming';
 }
 
 ?>
 
 <!DOCTYPE html>
+
 <html lang="en">
 
 <head>
@@ -176,13 +354,19 @@ if ($totalAttendanceClasses > 0) {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
-            font-family: Arial, Helvetica, sans-serif;
+
+            font-family:
+                Arial,
+                Helvetica,
+                sans-serif;
         }
+
 
         body {
             background: #f4f6f9;
             color: #222;
         }
+
 
         /* =========================================================
            SIDEBAR
@@ -386,7 +570,8 @@ if ($totalAttendanceClasses > 0) {
         .cards {
             display: grid;
 
-            grid-template-columns: repeat(4, 1fr);
+            grid-template-columns:
+                repeat(4, 1fr);
 
             gap: 20px;
 
@@ -419,6 +604,15 @@ if ($totalAttendanceClasses > 0) {
             font-size: 28px;
 
             font-weight: bold;
+        }
+
+
+        .next-subject {
+            color: #666;
+
+            font-size: 12px;
+
+            margin-top: 6px;
         }
 
 
@@ -461,7 +655,7 @@ if ($totalAttendanceClasses > 0) {
 
             border-collapse: collapse;
 
-            min-width: 700px;
+            min-width: 800px;
         }
 
 
@@ -492,6 +686,33 @@ if ($totalAttendanceClasses > 0) {
         }
 
 
+        .subject-code {
+            font-weight: bold;
+        }
+
+
+        .subject-name {
+            color: #666;
+
+            font-size: 12px;
+
+            margin-top: 4px;
+        }
+
+
+        .room-type {
+            color: #777;
+
+            font-size: 11px;
+
+            margin-top: 4px;
+        }
+
+
+        /* =========================================================
+           STATUS
+        ========================================================= */
+
         .status {
             display: inline-block;
 
@@ -500,10 +721,40 @@ if ($totalAttendanceClasses > 0) {
             border-radius: 20px;
 
             font-size: 12px;
+        }
 
+
+        .status.completed {
             background: #e8f5e9;
 
             color: #2e7d32;
+        }
+
+
+        .status.ongoing {
+            background: #fff3cd;
+
+            color: #856404;
+        }
+
+
+        .status.upcoming {
+            background: #e3f2fd;
+
+            color: #1565c0;
+        }
+
+
+        /* =========================================================
+           NO CLASSES
+        ========================================================= */
+
+        .no-classes {
+            color: #777;
+
+            font-size: 14px;
+
+            padding: 10px 0;
         }
 
 
@@ -514,7 +765,8 @@ if ($totalAttendanceClasses > 0) {
         .quick-links {
             display: grid;
 
-            grid-template-columns: repeat(3, 1fr);
+            grid-template-columns:
+                repeat(3, 1fr);
 
             gap: 15px;
         }
@@ -563,7 +815,8 @@ if ($totalAttendanceClasses > 0) {
         @media (max-width: 1100px) {
 
             .cards {
-                grid-template-columns: repeat(2, 1fr);
+                grid-template-columns:
+                    repeat(2, 1fr);
             }
 
         }
@@ -643,7 +896,9 @@ if ($totalAttendanceClasses > 0) {
 
 
         <div class="logo">
+
             Smart Faculty Portal
+
         </div>
 
 
@@ -656,7 +911,9 @@ if ($totalAttendanceClasses > 0) {
                     href="dashboard.php"
                     class="active"
                 >
+
                     🏠 Dashboard
+
                 </a>
 
             </li>
@@ -665,7 +922,9 @@ if ($totalAttendanceClasses > 0) {
             <li>
 
                 <a href="timetable.php">
+
                     📅 Timetable
+
                 </a>
 
             </li>
@@ -674,7 +933,9 @@ if ($totalAttendanceClasses > 0) {
             <li>
 
                 <a href="attendance.php">
+
                     📊 Attendance
+
                 </a>
 
             </li>
@@ -683,7 +944,9 @@ if ($totalAttendanceClasses > 0) {
             <li>
 
                 <a href="announcements.php">
+
                     📢 Announcements
+
                 </a>
 
             </li>
@@ -692,7 +955,9 @@ if ($totalAttendanceClasses > 0) {
             <li>
 
                 <a href="profile.php">
+
                     👤 Profile
+
                 </a>
 
             </li>
@@ -704,13 +969,16 @@ if ($totalAttendanceClasses > 0) {
         <div class="logout">
 
             <a href="../auth/logout.php">
+
                 Logout
+
             </a>
 
         </div>
 
 
     </aside>
+
 
 
     <!-- =========================================================
@@ -726,7 +994,9 @@ if ($totalAttendanceClasses > 0) {
 
 
             <h2>
+
                 Student Dashboard
+
             </h2>
 
 
@@ -751,6 +1021,7 @@ if ($totalAttendanceClasses > 0) {
 
 
         </header>
+
 
 
         <!-- =====================================================
@@ -792,6 +1063,7 @@ if ($totalAttendanceClasses > 0) {
             </div>
 
 
+
             <!-- =================================================
                  SUMMARY CARDS
             ================================================== -->
@@ -803,9 +1075,10 @@ if ($totalAttendanceClasses > 0) {
 
                 <div class="card">
 
-
                     <div class="card-title">
+
                         My Section
+
                     </div>
 
 
@@ -815,35 +1088,39 @@ if ($totalAttendanceClasses > 0) {
 
                     </div>
 
-
                 </div>
+
 
 
                 <!-- TODAY'S CLASSES -->
 
                 <div class="card">
 
-
                     <div class="card-title">
+
                         Today's Classes
+
                     </div>
 
 
                     <div class="card-value">
-                        6
+
+                        <?= $todayClassCount ?>
+
                     </div>
 
-
                 </div>
+
 
 
                 <!-- ATTENDANCE -->
 
                 <div class="card">
 
-
                     <div class="card-title">
+
                         Attendance
+
                     </div>
 
 
@@ -853,29 +1130,39 @@ if ($totalAttendanceClasses > 0) {
 
                     </div>
 
-
                 </div>
+
 
 
                 <!-- NEXT CLASS -->
 
                 <div class="card">
 
-
                     <div class="card-title">
+
                         Next Class
+
                     </div>
 
 
                     <div class="card-value">
-                        P4
+
+                        <?= htmlspecialchars($nextClassPeriod) ?>
+
                     </div>
 
+
+                    <div class="next-subject">
+
+                        <?= htmlspecialchars($nextClassSubject) ?>
+
+                    </div>
 
                 </div>
 
 
             </div>
+
 
 
             <!-- =================================================
@@ -886,222 +1173,225 @@ if ($totalAttendanceClasses > 0) {
 
 
                 <h2>
+
                     📅 Today's Classes
+
                 </h2>
 
 
-                <div class="table-container">
+                <?php if (count($todayClasses) > 0): ?>
 
 
-                    <table>
+                    <div class="table-container">
 
 
-                        <thead>
+                        <table>
 
-                            <tr>
 
-                                <th>
-                                    Period
-                                </th>
+                            <thead>
 
-                                <th>
-                                    Time
-                                </th>
+                                <tr>
 
-                                <th>
-                                    Subject
-                                </th>
+                                    <th>
 
-                                <th>
-                                    Faculty
-                                </th>
+                                        Period
 
-                                <th>
-                                    Room
-                                </th>
+                                    </th>
 
-                                <th>
-                                    Status
-                                </th>
+                                    <th>
 
-                            </tr>
+                                        Time
 
-                        </thead>
+                                    </th>
 
+                                    <th>
 
-                        <tbody>
+                                        Subject
 
+                                    </th>
 
-                            <tr>
+                                    <th>
 
+                                        Faculty
 
-                                <td class="period">
-                                    P1
-                                </td>
+                                    </th>
 
+                                    <th>
 
-                                <td>
-                                    09:00 - 09:50
-                                </td>
+                                        Room
 
+                                    </th>
 
-                                <td>
-                                    Operating Systems
-                                </td>
+                                    <th>
 
+                                        Status
 
-                                <td>
-                                    Faculty 01
-                                </td>
+                                    </th>
 
+                                </tr>
 
-                                <td>
-                                    CS-101
-                                </td>
+                            </thead>
 
 
-                                <td>
+                            <tbody>
 
-                                    <span class="status">
-                                        Completed
-                                    </span>
 
-                                </td>
+                                <?php foreach ($todayClasses as $class): ?>
 
 
-                            </tr>
+                                    <?php
 
+                                    $classStatus = getClassStatus(
+                                        $class['start_time'],
+                                        $class['end_time']
+                                    );
 
-                            <tr>
+                                    $statusClass =
+                                        strtolower($classStatus);
 
+                                    ?>
 
-                                <td class="period">
-                                    P2
-                                </td>
 
+                                    <tr>
 
-                                <td>
-                                    09:50 - 10:40
-                                </td>
 
+                                        <!-- PERIOD -->
 
-                                <td>
-                                    Database Management
-                                </td>
+                                        <td class="period">
 
+                                            P<?= htmlspecialchars(
+                                                $class['period_number']
+                                            ) ?>
 
-                                <td>
-                                    Faculty 02
-                                </td>
+                                        </td>
 
 
-                                <td>
-                                    CS-101
-                                </td>
 
+                                        <!-- TIME -->
 
-                                <td>
+                                        <td>
 
-                                    <span class="status">
-                                        Completed
-                                    </span>
+                                            <?= htmlspecialchars(
+                                                $class['start_time']
+                                            ) ?>
 
-                                </td>
+                                            -
 
+                                            <?= htmlspecialchars(
+                                                $class['end_time']
+                                            ) ?>
 
-                            </tr>
+                                        </td>
 
 
-                            <tr>
 
+                                        <!-- SUBJECT -->
 
-                                <td class="period">
-                                    P3
-                                </td>
+                                        <td>
 
+                                            <div class="subject-code">
 
-                                <td>
-                                    11:00 - 11:50
-                                </td>
+                                                <?= htmlspecialchars(
+                                                    $class['subject_code']
+                                                ) ?>
 
+                                            </div>
 
-                                <td>
-                                    Computer Networks
-                                </td>
 
+                                            <div class="subject-name">
 
-                                <td>
-                                    Faculty 03
-                                </td>
+                                                <?= htmlspecialchars(
+                                                    $class['subject_name']
+                                                ) ?>
 
+                                            </div>
 
-                                <td>
-                                    CS-102
-                                </td>
+                                        </td>
 
 
-                                <td>
 
-                                    <span class="status">
-                                        Upcoming
-                                    </span>
+                                        <!-- FACULTY -->
 
-                                </td>
+                                        <td>
 
+                                            <?= htmlspecialchars(
+                                                $class['faculty_name']
+                                            ) ?>
 
-                            </tr>
+                                        </td>
 
 
-                            <tr>
 
+                                        <!-- ROOM -->
 
-                                <td class="period">
-                                    P4
-                                </td>
+                                        <td>
 
+                                            <?= htmlspecialchars(
+                                                $class['room_number']
+                                            ) ?>
 
-                                <td>
-                                    11:50 - 12:40
-                                </td>
 
+                                            <div class="room-type">
 
-                                <td>
-                                    Advanced DSA
-                                </td>
+                                                <?= htmlspecialchars(
+                                                    $class['room_type']
+                                                ) ?>
 
+                                            </div>
 
-                                <td>
-                                    Faculty 04
-                                </td>
+                                        </td>
 
 
-                                <td>
-                                    CS-102
-                                </td>
 
+                                        <!-- STATUS -->
 
-                                <td>
+                                        <td>
 
-                                    <span class="status">
-                                        Upcoming
-                                    </span>
+                                            <span
+                                                class="status <?= htmlspecialchars(
+                                                    $statusClass
+                                                ) ?>"
+                                            >
 
-                                </td>
+                                                <?= htmlspecialchars(
+                                                    $classStatus
+                                                ) ?>
 
+                                            </span>
 
-                            </tr>
+                                        </td>
 
 
-                        </tbody>
+                                    </tr>
 
 
-                    </table>
+                                <?php endforeach; ?>
 
 
-                </div>
+                            </tbody>
+
+
+                        </table>
+
+
+                    </div>
+
+
+                <?php else: ?>
+
+
+                    <p class="no-classes">
+
+                        No classes scheduled for today.
+
+                    </p>
+
+
+                <?php endif; ?>
 
 
             </div>
+
 
 
             <!-- =================================================
@@ -1112,7 +1402,9 @@ if ($totalAttendanceClasses > 0) {
 
 
                 <h2>
+
                     Quick Access
+
                 </h2>
 
 
@@ -1125,14 +1417,20 @@ if ($totalAttendanceClasses > 0) {
                     >
 
                         <strong>
+
                             📅 View Timetable
+
                         </strong>
 
+
                         <span>
+
                             Check your daily and weekly timetable.
+
                         </span>
 
                     </a>
+
 
 
                     <a
@@ -1141,14 +1439,20 @@ if ($totalAttendanceClasses > 0) {
                     >
 
                         <strong>
+
                             📊 View Attendance
+
                         </strong>
 
+
                         <span>
+
                             Check your subject-wise attendance.
+
                         </span>
 
                     </a>
+
 
 
                     <a
@@ -1157,11 +1461,16 @@ if ($totalAttendanceClasses > 0) {
                     >
 
                         <strong>
+
                             📢 Announcements
+
                         </strong>
 
+
                         <span>
+
                             View the latest portal announcements.
+
                         </span>
 
                     </a>
@@ -1181,4 +1490,9 @@ if ($totalAttendanceClasses > 0) {
 
 </body>
 
-</html>
+</html><script>
+    // Automatically refresh dashboard every 60 seconds
+    setInterval(function () {
+        location.reload();
+    }, 60000);
+</script>

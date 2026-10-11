@@ -1,0 +1,677 @@
+﻿
+/* ============================================
+   SMART FACULTY ASSISTANT
+   PREMIUM DARK HOD DASHBOARD
+   Theme only - Existing HTML and PHP unchanged
+   ============================================ */
+
+/* GLOBAL */
+
+:root {
+    --hod-bg: #0c1220;
+    --hod-sidebar: #111a2b;
+    --hod-panel: #172235;
+    --hod-panel-hover: #1e2b42;
+    --hod-border: #2a364b;
+    --hod-text: #f1f5ff;
+    --hod-muted: #9ba9c1;
+    --hod-purple: #b4a0ff;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+html {
+    scroll-behavior: smooth;
+}
+
+body {
+    min-height: 100vh;
+    font-family: Inter, "Segoe UI", Arial, sans-serif;
+    background:
+        radial-gradient(
+            ellipse at 95% 5%,
+            rgba(112, 81, 211, 0.11),
+            transparent 42%
+        ),
+        var(--hod-bg);
+
+    color: var(--hod-text);
+    line-height: 1.55;
+}
+
+a {
+    color: var(--hod-purple);
+}
+
+/* ============================================
+   NAVBAR
+   ============================================ */
+
+.navbar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 1000;
+
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+
+    min-height: 70px;
+    padding: 12px 28px;
+
+    background: rgba(17, 26, 43, 0.97);
+    border-bottom: 1px solid var(--hod-border);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+}
+
+.navbar-left {
+    color: #ffffff;
+    font-size: 19px;
+    font-weight: 800;
+    letter-spacing: -0.3px;
+}
+
+.navbar-right {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 14px;
+
+    color: #d5def0;
+    font-size: 13px;
+}
+
+.role-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+
+    padding: 7px 13px;
+
+    background: #39315f;
+    border: 1px solid #584a8c;
+    border-radius: 9px;
+
+    color: #d4c7ff;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.8px;
+}
+
+.logout-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+
+    padding: 9px 16px;
+
+    background: #482a38;
+    border: 1px solid #77465a;
+    border-radius: 9px;
+
+    color: #ffc0cb;
+    text-decoration: none;
+
+    font-size: 12px;
+    font-weight: 750;
+
+    transition: background 0.2s ease;
+}
+
+.logout-btn:hover {
+    background: #653747;
+    color: #ffffff;
+}
+
+/* ============================================
+   SIDEBAR
+   ============================================ */
+
+.sidebar {
+    position: fixed;
+    top: 70px;
+    left: 0;
+    bottom: 0;
+
+    width: 245px;
+    padding: 22px 12px 28px;
+
+    background: var(--hod-sidebar);
+    border-right: 1px solid var(--hod-border);
+
+    overflow-y: auto;
+    overflow-x: hidden;
+}
+
+.sidebar h2 {
+    margin: 8px 10px 24px;
+    color: #a996ff;
+
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 1.4px;
+    text-align: left;
+}
+
+.sidebar a {
+    display: flex;
+    align-items: center;
+
+    min-height: 43px;
+    margin-bottom: 5px;
+    padding: 11px 15px;
+
+    border: 1px solid transparent;
+    border-radius: 10px;
+
+    color: #9eabc2;
+    text-decoration: none;
+
+    font-size: 13px;
+    font-weight: 550;
+
+    transition:
+        color 0.2s ease,
+        background 0.2s ease,
+        border-color 0.2s ease;
+}
+
+.sidebar a:hover {
+    background: #272c46;
+    border-color: #47416e;
+    color: #e8deff;
+}
+
+.sidebar a.active,
+.sidebar a[aria-current="page"] {
+    background: #302b53;
+    border-color: #51477c;
+    color: #ddd1ff;
+    font-weight: 750;
+}
+
+/* SCROLLBAR */
+
+.sidebar::-webkit-scrollbar {
+    width: 6px;
+}
+
+.sidebar::-webkit-scrollbar-track {
+    background: #111a2b;
+}
+
+.sidebar::-webkit-scrollbar-thumb {
+    background: #3b4862;
+    border-radius: 20px;
+}
+
+/* ============================================
+   MAIN CONTENT
+   ============================================ */
+
+main {
+    margin-left: 245px;
+    padding: 106px 34px 40px;
+    min-height: 100vh;
+
+    background: transparent;
+}
+
+/* PAGE HEADING */
+
+.dashboard-title {
+    margin-bottom: 27px;
+}
+
+.dashboard-title h1,
+h1.dashboard-title {
+    color: #f7f5ff;
+    font-size: clamp(27px, 3vw, 35px);
+    font-weight: 800;
+    letter-spacing: -0.6px;
+    line-height: 1.25;
+}
+
+.dashboard-title p {
+    margin-top: 10px;
+    color: var(--hod-muted);
+    font-size: 13px;
+    line-height: 1.8;
+}
+
+main > p {
+    color: var(--hod-muted);
+    line-height: 1.8;
+}
+
+/* ============================================
+   DASHBOARD STATISTICS
+   ============================================ */
+
+.dashboard-cards {
+    display: grid;
+
+    grid-template-columns:
+        repeat(auto-fit, minmax(190px, 1fr));
+
+    gap: 18px;
+}
+
+.dashboard-card {
+    position: relative;
+
+    min-height: 145px;
+    padding: 25px;
+
+    background: var(--hod-panel);
+    border: 1px solid var(--hod-border);
+    border-radius: 16px;
+
+    box-shadow: 0 10px 26px rgba(0, 0, 0, 0.12);
+
+    transition:
+        background 0.2s ease,
+        border-color 0.2s ease,
+        transform 0.2s ease;
+}
+
+.dashboard-card:hover {
+    transform: translateY(-4px);
+
+    background: var(--hod-panel-hover);
+    border-color: #7365af;
+}
+
+.dashboard-card::before {
+    content: "";
+
+    position: absolute;
+    top: 0;
+    left: 22px;
+    right: 22px;
+
+    height: 2px;
+
+    background: linear-gradient(
+        90deg,
+        transparent,
+        #9f87ff,
+        transparent
+    );
+
+    opacity: 0;
+    transition: opacity 0.2s ease;
+}
+
+.dashboard-card:hover::before {
+    opacity: 1;
+}
+
+.dashboard-card h3 {
+    margin-bottom: 16px;
+
+    color: #ae9dff;
+
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: 0.3px;
+}
+
+.dashboard-card .number {
+    display: block;
+
+    color: #ffffff;
+
+    font-size: 36px;
+    font-weight: 800;
+    line-height: 1.2;
+    letter-spacing: -1px;
+}
+
+/* ============================================
+   TABLE CONTAINERS
+   ============================================ */
+
+.table-container {
+    margin-top: 26px;
+    padding: 25px;
+
+    background: var(--hod-panel);
+    border: 1px solid var(--hod-border);
+    border-radius: 17px;
+
+    overflow-x: auto;
+}
+
+.table-container h2 {
+    margin-bottom: 20px;
+
+    color: #ffffff;
+
+    font-size: 21px;
+    font-weight: 750;
+}
+
+.table-container h3 {
+    margin-bottom: 16px;
+
+    color: #ece8ff;
+    font-size: 16px;
+}
+
+/* ============================================
+   TABLES
+   ============================================ */
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+
+    color: #d8e0ed;
+    background: transparent;
+
+    font-size: 13px;
+}
+
+th,
+td {
+    padding: 15px 14px;
+
+    border-bottom: 1px solid #2d3b51;
+
+    text-align: left;
+    vertical-align: middle;
+    line-height: 1.5;
+}
+
+th {
+    background: #222f45;
+    color: #ded4ff;
+
+    font-weight: 750;
+}
+
+td {
+    background: #172235;
+    color: #cbd5e5;
+}
+
+tr:last-child th,
+tr:last-child td {
+    border-bottom: none;
+}
+
+tbody tr:hover td {
+    background: #202e45;
+}
+
+.table-container table th:first-child {
+    width: 29%;
+    min-width: 135px;
+}
+
+/* ============================================
+   BUTTONS
+   ============================================ */
+
+.btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+
+    gap: 8px;
+    padding: 10px 17px;
+
+    border: 1px solid transparent;
+    border-radius: 9px;
+
+    text-decoration: none;
+
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 750;
+
+    cursor: pointer;
+    transition:
+        background 0.2s ease,
+        transform 0.2s ease;
+}
+
+.btn:hover {
+    transform: translateY(-2px);
+}
+
+.btn-primary {
+    background: #a995ff;
+    color: #1b1730;
+}
+
+.btn-primary:hover {
+    background: #c5b7ff;
+}
+
+.btn-danger {
+    background: #502d3c;
+    border-color: #865065;
+    color: #ffbcc9;
+}
+
+.btn-danger:hover {
+    background: #714052;
+}
+
+.btn-success {
+    background: #205044;
+    border-color: #377c68;
+    color: #a7f4d4;
+}
+
+.btn-success:hover {
+    background: #2c6756;
+}
+
+/* ============================================
+   GENERAL FORM ELEMENTS
+   ============================================ */
+
+input,
+select,
+textarea {
+    max-width: 100%;
+    font-family: inherit;
+}
+
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+button:focus-visible,
+a:focus-visible {
+    outline: 3px solid #ac98ff;
+    outline-offset: 2px;
+}
+
+/* ============================================
+   TABLET
+   ============================================ */
+
+@media (max-width: 1100px) {
+    .sidebar {
+        width: 220px;
+    }
+
+    main {
+        margin-left: 220px;
+        padding: 102px 24px 32px;
+    }
+
+    .dashboard-cards {
+        grid-template-columns:
+            repeat(auto-fit, minmax(180px, 1fr));
+    }
+}
+
+/* ============================================
+   MOBILE
+   ============================================ */
+
+@media (max-width: 760px) {
+    .navbar {
+        min-height: 64px;
+        padding: 12px 16px;
+    }
+
+    .navbar-left {
+        font-size: 15px;
+    }
+
+    .navbar-right {
+        gap: 8px;
+        font-size: 11px;
+    }
+
+    .role-badge {
+        padding: 5px 8px;
+    }
+
+    .logout-btn {
+        padding: 7px 10px;
+    }
+
+    .sidebar {
+        position: relative;
+        top: auto;
+        left: auto;
+        bottom: auto;
+
+        width: 100%;
+        height: auto;
+
+        margin-top: 64px;
+        padding: 12px;
+
+        display: flex;
+        flex-wrap: nowrap;
+        gap: 6px;
+
+        overflow-x: auto;
+        overflow-y: hidden;
+
+        border-right: none;
+        border-bottom: 1px solid var(--hod-border);
+    }
+
+    .sidebar h2 {
+        display: none;
+    }
+
+    .sidebar a {
+        flex-shrink: 0;
+
+        margin: 0;
+        padding: 10px 13px;
+
+        min-height: 40px;
+        white-space: nowrap;
+        font-size: 12px;
+    }
+
+    main {
+        margin-left: 0;
+        padding: 26px 16px 32px;
+    }
+
+    .dashboard-title h1,
+    h1.dashboard-title {
+        font-size: 27px;
+    }
+
+    .dashboard-cards {
+        grid-template-columns:
+            repeat(2, minmax(0, 1fr));
+
+        gap: 12px;
+    }
+
+    .dashboard-card {
+        min-height: 120px;
+        padding: 18px;
+    }
+
+    .dashboard-card h3 {
+        font-size: 11px;
+    }
+
+    .dashboard-card .number {
+        font-size: 28px;
+    }
+
+    .table-container {
+        padding: 18px 14px;
+    }
+
+    .table-container h2 {
+        font-size: 19px;
+    }
+
+    th,
+    td {
+        padding: 11px 10px;
+        font-size: 12px;
+    }
+}
+
+@media (max-width: 400px) {
+    .dashboard-cards {
+        grid-template-columns: 1fr;
+    }
+
+    .navbar-left {
+        font-size: 13px;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        scroll-behavior: auto !important;
+        transition-duration: 0.01ms !important;
+    }
+}
+
+/* Compact Faculty Management table columns */
+
+.table-container table {
+    width: 100%;
+    table-layout: auto;
+}
+
+.table-container table th:first-child,
+.table-container table td:first-child {
+    width: 55px;
+    min-width: 55px;
+    max-width: 55px;
+    padding-left: 12px;
+    padding-right: 8px;
+}
+
+.table-container table th:nth-child(2),
+.table-container table td:nth-child(2) {
+    width: 110px;
+    min-width: 100px;
+    padding-left: 8px;
+    padding-right: 12px;
+}
+
+/* Remove previous oversized first-column width */
+.table-container table th:first-child {
+    min-width: 55px;
+}

@@ -1,189 +1,149 @@
-<?php
 
+<?php
 require_once "../includes/auth-check.php";
 require_once "../includes/role-check.php";
 
-requireRole('HOD');
+requireRole('FACULTY');
 
-require_once "../config/database.php";
-require_once "../config/config.php";
-
-$pageTitle = "HOD Dashboard";
-
-
-// Faculty count
-$result = $conn->query("
-    SELECT COUNT(*) AS total
-    FROM faculty
-");
-
-$facultyCount = $result->fetch_assoc()['total'];
-
-
-// Student count
-$result = $conn->query("
-    SELECT COUNT(*) AS total
-    FROM students
-");
-
-$studentCount = $result->fetch_assoc()['total'];
-
-
-// Section count
-$result = $conn->query("
-    SELECT COUNT(*) AS total
-    FROM sections
-");
-
-$sectionCount = $result->fetch_assoc()['total'];
-
-
-// Subject count
-$result = $conn->query("
-    SELECT COUNT(*) AS total
-    FROM subjects
-");
-
-$subjectCount = $result->fetch_assoc()['total'];
-
-
-// Classroom/resource count
-$result = $conn->query("
-    SELECT COUNT(*) AS total
-    FROM classrooms
-");
-
-$roomCount = $result->fetch_assoc()['total'];
-
-
-// Timetable entries
-$result = $conn->query("
-    SELECT COUNT(*) AS total
-    FROM timetable
-");
-
-$timetableCount = $result->fetch_assoc()['total'];
-
+$username = htmlspecialchars(
+    $_SESSION['username'] ?? 'Faculty',
+    ENT_QUOTES,
+    'UTF-8'
+);
 ?>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Faculty Dashboard | Smart Faculty Assistant</title>
+    <link rel="stylesheet" href="../assets/css/style.css?v=13">
+</head>
 
-<?php require_once "../includes/header.php"; ?>
+<body class="faculty-dashboard">
 
-<?php require_once "../includes/navbar.php"; ?>
+<header class="fd-topbar">
+    <a href="dashboard.php" class="fd-brand">
+        <span class="fd-brand-name">Smart Faculty</span>
+        <span class="fd-brand-subtitle">ASSISTANT PORTAL</span>
+    </a>
 
-<?php require_once "../includes/sidebar.php"; ?>
-
-
-<main>
-
-    <h1 class="dashboard-title">
-        HOD Dashboard
-    </h1>
-
-    <p>
-        Smart Faculty Assistant & Period-Wise Attendance
-        Management Portal
-    </p>
-
-
-    <div class="dashboard-cards">
-
-        <div class="dashboard-card">
-            <h3>Total Faculty</h3>
-
-            <div class="number">
-                <?php echo $facultyCount; ?>
-            </div>
+    <div class="fd-user">
+        <div class="fd-avatar">
+            <?= strtoupper(substr($username, 0, 1)) ?>
         </div>
 
-
-        <div class="dashboard-card">
-            <h3>Total Students</h3>
-
-            <div class="number">
-                <?php echo $studentCount; ?>
-            </div>
+        <div class="fd-user-info">
+            <strong><?= $username ?></strong>
+            <span>Faculty Member</span>
         </div>
 
-
-        <div class="dashboard-card">
-            <h3>Total Sections</h3>
-
-            <div class="number">
-                <?php echo $sectionCount; ?>
-            </div>
-        </div>
-
-
-        <div class="dashboard-card">
-            <h3>Total Subjects</h3>
-
-            <div class="number">
-                <?php echo $subjectCount; ?>
-            </div>
-        </div>
-
-
-        <div class="dashboard-card">
-            <h3>Rooms & Labs</h3>
-
-            <div class="number">
-                <?php echo $roomCount; ?>
-            </div>
-        </div>
-
-
-        <div class="dashboard-card">
-            <h3>Timetable Entries</h3>
-
-            <div class="number">
-                <?php echo $timetableCount; ?>
-            </div>
-        </div>
-
+        <a class="fd-logout" href="../auth/logout.php">
+            <span>Logout</span>
+            <span aria-hidden="true">↗</span>
+        </a>
     </div>
+</header>
 
+<main class="fd-main">
 
-    <div class="table-container">
+    <section class="fd-welcome">
+        <div class="fd-welcome-content">
+            <span class="fd-eyebrow">FACULTY WORKSPACE</span>
 
-        <h2>Department Information</h2>
+            <h1>Welcome back, <?= $username ?>!</h1>
 
-        <br>
+            <p>
+                Manage your timetable, stay updated with notifications,
+                and organize your faculty activities in one place.
+            </p>
 
-        <table>
+            <a href="timetable.php" class="fd-primary-btn">
+                View My Timetable <span>→</span>
+            </a>
+        </div>
 
-            <tr>
-                <th>Department</th>
-                <td>Computer Science and Engineering</td>
-            </tr>
+        <div class="fd-welcome-art" aria-hidden="true">
+            <div class="fd-art-circle">
+                <span>✦</span>
+                <div class="fd-art-book">▤</div>
+                <span class="fd-art-star">✧</span>
+            </div>
+        </div>
+    </section>
 
-            <tr>
-                <th>Year</th>
-                <td>2nd Year</td>
-            </tr>
+    <section class="fd-section">
+        <div class="fd-section-heading">
+            <div>
+                <span class="fd-eyebrow">QUICK ACCESS</span>
+                <h2>Your Faculty Workspace</h2>
+                <p>Choose a module to get started.</p>
+            </div>
 
-            <tr>
-                <th>Semester</th>
-                <td>3rd Semester</td>
-            </tr>
+            <span class="fd-module-count">05 MODULES</span>
+        </div>
 
-            <tr>
-                <th>Sections</th>
-                <td>CSE-A, CSE-B, CSE-C, CSE-D, CSE-E</td>
-            </tr>
+        <div class="fd-grid">
 
-            <tr>
-                <th>Working Days</th>
-                <td>Monday – Friday</td>
-            </tr>
+            <a href="timetable.php" class="fd-card">
+                <div class="fd-card-top">
+                    <span class="fd-card-icon">▦</span>
+                    <span class="fd-card-arrow">↗</span>
+                </div>
+                <h3>My Timetable</h3>
+                <p>View your weekly class schedule and periods.</p>
+                <span class="fd-card-link">Open timetable →</span>
+            </a>
 
-            <tr>
-                <th>Saturday</th>
-                <td>EE Project</td>
-            </tr>
+            <a href="notifications.php" class="fd-card">
+                <div class="fd-card-top">
+                    <span class="fd-card-icon">♧</span>
+                    <span class="fd-card-arrow">↗</span>
+                </div>
+                <h3>Notifications</h3>
+                <p>Stay informed about reminders and important updates.</p>
+                <span class="fd-card-link">View notifications →</span>
+            </a>
 
-        </table>
+            <a href="profile.php" class="fd-card">
+                <div class="fd-card-top">
+                    <span class="fd-card-icon">♙</span>
+                    <span class="fd-card-arrow">↗</span>
+                </div>
+                <h3>My Profile</h3>
+                <p>View and manage your faculty profile information.</p>
+                <span class="fd-card-link">View profile →</span>
+            </a>
 
-    </div>
+            <a href="availability.php" class="fd-card">
+                <div class="fd-card-top">
+                    <span class="fd-card-icon">◷</span>
+                    <span class="fd-card-arrow">↗</span>
+                </div>
+                <h3>Faculty Availability</h3>
+                <p>Manage your availability and schedule information.</p>
+                <span class="fd-card-link">Manage availability →</span>
+            </a>
 
+            <a href="requests.php" class="fd-card">
+                <div class="fd-card-top">
+                    <span class="fd-card-icon">⇄</span>
+                    <span class="fd-card-arrow">↗</span>
+                </div>
+                <h3>Handover Requests</h3>
+                <p>Access your faculty class handover requests.</p>
+                <span class="fd-card-link">View requests →</span>
+            </a>
 
-<?php require_once "../includes/footer.php"; ?>
+        </div>
+    </section>
+
+    <footer class="fd-footer">
+        <span>© <?= date('Y') ?> Smart Faculty Assistant Portal</span>
+        <span>Designed for smarter faculty management</span>
+    </footer>
+
+</main>
+
+</body>
+</html>

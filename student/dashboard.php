@@ -1,24 +1,38 @@
+
 <?php
-date_default_timezone_set('Asia/Kolkata');
+
+date_default_timezone_set("Asia/Kolkata");
 
 require_once "../includes/auth-check.php";
 require_once "../includes/role-check.php";
 require_once "../config/database.php";
 
-requireRole('STUDENT');
+requireRole("STUDENT");
 
-$username = $_SESSION['username'] ?? '';
+$pageTitle = "Student Dashboard";
 
-if ($username === '') {
-    die("Student session not found.");
+/* =========================================
+   OUTPUT ESCAPING
+   ========================================= */
+
+function studentDashEscape($value)
+{
+    return htmlspecialchars(
+        (string)($value ?? ""),
+        ENT_QUOTES,
+        "UTF-8"
+    );
 }
 
+/* =========================================
+   CURRENT STUDENT
+   ========================================= */
 
-/*
-|--------------------------------------------------------------------------
-| Get logged-in student's details
-|--------------------------------------------------------------------------
-*/
+$username = $_SESSION["username"] ?? "";
+
+if ($username === "") {
+    die("Student session not found.");
+}
 
 $studentSql = "
     SELECT
@@ -60,36 +74,21 @@ if ($studentResult->num_rows !== 1) {
 }
 
 $student = $studentResult->fetch_assoc();
-
 $studentStmt->close();
 
-
-/*
-|--------------------------------------------------------------------------
-| Student variables
-|--------------------------------------------------------------------------
-*/
-
-$studentId = (int) $student['student_id'];
-
-$studentName = $student['student_name'];
-
-$registerNumber = $student['register_number'];
-
-$sectionId = (int) $student['section_id'];
-
-$sectionName = $student['section_name'];
+$studentId = (int)$student["student_id"];
+$studentName = $student["student_name"];
+$registerNumber = $student["register_number"];
+$sectionId = (int)$student["section_id"];
+$sectionName = $student["section_name"];
 
 $firstLetter = strtoupper(
     substr(trim($studentName), 0, 1)
 );
 
-
-/*
-|--------------------------------------------------------------------------
-| Attendance summary
-|--------------------------------------------------------------------------
-*/
+/* =========================================
+   ATTENDANCE SUMMARY
+   ========================================= */
 
 $attendanceSql = "
     SELECT
@@ -114,28 +113,22 @@ if (!$attendanceStmt) {
 }
 
 $attendanceStmt->bind_param("i", $studentId);
-
 $attendanceStmt->execute();
 
-$attendanceResult = $attendanceStmt->get_result();
-
-$attendanceData = $attendanceResult->fetch_assoc();
+$attendanceData = $attendanceStmt
+    ->get_result()
+    ->fetch_assoc();
 
 $attendanceStmt->close();
 
-
 $totalAttendanceClasses =
-    (int) ($attendanceData['total_classes'] ?? 0);
+    (int)($attendanceData["total_classes"] ?? 0);
 
 $presentAttendanceClasses =
-    (int) ($attendanceData['present_classes'] ?? 0);
+    (int)($attendanceData["present_classes"] ?? 0);
 
-
-/*
-|--------------------------------------------------------------------------
-| Calculate attendance percentage
-|--------------------------------------------------------------------------
-*/
+$attendancePercentage = null;
+$attendanceDisplay = "N/A";
 
 if ($totalAttendanceClasses > 0) {
 
@@ -144,33 +137,14 @@ if ($totalAttendanceClasses > 0) {
         1
     );
 
-    $attendanceDisplay =
-        $attendancePercentage . '%';
-
-} else {
-
-    $attendancePercentage = null;
-
-    $attendanceDisplay = 'N/A';
+    $attendanceDisplay = $attendancePercentage . "%";
 }
 
+/* =========================================
+   TODAY'S TIMETABLE
+   ========================================= */
 
-/*
-|--------------------------------------------------------------------------
-| Get today's day
-|--------------------------------------------------------------------------
-*/
-
-$todayDay = strtoupper(
-    date('l')
-);
-
-
-/*
-|--------------------------------------------------------------------------
-| Get today's timetable
-|--------------------------------------------------------------------------
-*/
+$todayDay = strtoupper(date("l"));
 
 $todaySql = "
     SELECT
@@ -227,115 +201,66 @@ $todayStmt->bind_param(
 $todayStmt->execute();
 
 $todayResult = $todayStmt->get_result();
-
-
-/*
-|--------------------------------------------------------------------------
-| Store today's classes
-|--------------------------------------------------------------------------
-*/
-
 $todayClasses = [];
 
-while ($row = $todayResult->fetch_assoc()) {
-
-    $todayClasses[] = $row;
+while ($classRow = $todayResult->fetch_assoc()) {
+    $todayClasses[] = $classRow;
 }
 
 $todayStmt->close();
 
-
-/*
-|--------------------------------------------------------------------------
-| Today's class count
-|--------------------------------------------------------------------------
-*/
-
 $todayClassCount = count($todayClasses);
 
+/* =========================================
+   CURRENT AND NEXT CLASS
+   ========================================= */
 
-/*
-|--------------------------------------------------------------------------
-| Find next class
-|--------------------------------------------------------------------------
-|
-| Compare current time with period start/end time.
-|--------------------------------------------------------------------------
-*/
-
-$currentTime = date('H:i:s');
+$currentTime = date("H:i:s");
 
 $nextClass = null;
 
 foreach ($todayClasses as $class) {
 
-    $startTime = $class['start_time'];
-
-    $endTime = $class['end_time'];
-
-    if ($currentTime < $endTime) {
-
+    if ($currentTime < $class["end_time"]) {
         $nextClass = $class;
-
         break;
     }
 }
 
+$nextClassPeriod = $nextClass
+    ? "P" . $nextClass["period_number"]
+    : "—";
 
-/*
-|--------------------------------------------------------------------------
-| Next class display
-|--------------------------------------------------------------------------
-*/
+$nextClassSubject = $nextClass
+    ? $nextClass["subject_code"]
+    : "No more classes";
 
-if ($nextClass !== null) {
-
-    $nextClassPeriod =
-        'P' . $nextClass['period_number'];
-
-    $nextClassSubject =
-        $nextClass['subject_code'];
-
-} else {
-
-    $nextClassPeriod = '—';
-
-    $nextClassSubject = 'No more classes';
-
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| Helper function for class status
-|--------------------------------------------------------------------------
-*/
-
-function getClassStatus($startTime, $endTime)
+function studentDashClassStatus($startTime, $endTime)
 {
-    $currentTime = date('H:i:s');
+    $currentTime = date("H:i:s");
 
     if ($currentTime >= $endTime) {
-
-        return 'Completed';
+        return "Completed";
     }
 
     if ($currentTime >= $startTime) {
-
-        return 'Ongoing';
+        return "Ongoing";
     }
 
-    return 'Upcoming';
+    return "Upcoming";
+}
+
+function studentDashTime($time)
+{
+    return date("h:i A", strtotime($time));
 }
 
 ?>
 
 <!DOCTYPE html>
-
 <html lang="en">
 
 <head>
-
     <meta charset="UTF-8">
 
     <meta
@@ -344,1155 +269,1400 @@ function getClassStatus($startTime, $endTime)
     >
 
     <title>
-        Student Dashboard | Smart Faculty Portal
+        Student Dashboard | SmartFacultyPortal
     </title>
 
-
     <style>
+        /* =========================================
+           STUDENT DASHBOARD
+           PREMIUM NAVY + VIOLET THEME
+           SELF-CONTAINED CSS
+           ========================================= */
+
+        :root {
+            --bg: #0c1424;
+            --sidebar: #111b2d;
+            --surface: #172338;
+            --surface-alt: #1c2a42;
+            --border: #2b3a54;
+            --text: #eef2fc;
+            --muted: #9eacc6;
+            --violet: #aa94ff;
+            --violet-light: #d4c8ff;
+            --green: #75dec1;
+            --amber: #f1d38c;
+        }
 
         * {
-            margin: 0;
-            padding: 0;
             box-sizing: border-box;
-
-            font-family:
-                Arial,
-                Helvetica,
-                sans-serif;
         }
 
+        html {
+            scroll-behavior: smooth;
+        }
 
         body {
-            background: #f4f6f9;
-            color: #222;
-        }
-
-
-        /* =========================================================
-           SIDEBAR
-        ========================================================= */
-
-        .sidebar {
-            position: fixed;
-
-            left: 0;
-            top: 0;
-
-            width: 240px;
-            height: 100vh;
-
-            background: #151a2d;
-
-            padding: 25px 15px;
-        }
-
-
-        .logo {
-            color: white;
-
-            font-size: 21px;
-
-            font-weight: bold;
-
-            text-align: center;
-
-            margin-bottom: 35px;
-        }
-
-
-        .menu {
-            list-style: none;
-        }
-
-
-        .menu li {
-            margin-bottom: 8px;
-        }
-
-
-        .menu a {
-            display: block;
-
-            padding: 13px 15px;
-
-            color: #d7d9e0;
-
-            text-decoration: none;
-
-            border-radius: 8px;
-
-            transition: 0.2s;
-        }
-
-
-        .menu a:hover,
-        .menu a.active {
-            background: #252d4d;
-
-            color: white;
-        }
-
-
-        .logout {
-            position: absolute;
-
-            bottom: 25px;
-
-            left: 15px;
-            right: 15px;
-        }
-
-
-        .logout a {
-            display: block;
-
-            text-align: center;
-
-            padding: 12px;
-
-            background: #dc3545;
-
-            color: white;
-
-            text-decoration: none;
-
-            border-radius: 8px;
-
-            transition: 0.2s;
-        }
-
-
-        .logout a:hover {
-            background: #c82333;
-        }
-
-
-        /* =========================================================
-           MAIN
-        ========================================================= */
-
-        .main {
-            margin-left: 240px;
-
+            margin: 0;
             min-height: 100vh;
+            background: var(--bg);
+            color: var(--text);
+            font-family: Arial, Helvetica, sans-serif;
+            line-height: 1.5;
         }
 
+        a {
+            color: inherit;
+        }
 
-        /* =========================================================
-           TOP BAR
-        ========================================================= */
+        button {
+            font: inherit;
+        }
 
-        .topbar {
-            height: 70px;
+        /* =========================================
+           SIDEBAR
+           ========================================= */
 
-            background: white;
+        .student-sidebar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            bottom: 0;
+
+            width: 255px;
+            padding: 28px 17px;
 
             display: flex;
+            flex-direction: column;
 
+            border-right: 1px solid var(--border);
+            background: #101a2d;
+            z-index: 50;
+        }
+
+        .student-brand {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+
+            padding: 4px 8px 29px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .student-brand-icon {
+            width: 44px;
+            height: 44px;
+            flex-shrink: 0;
+
+            display: flex;
+            justify-content: center;
+            align-items: center;
+
+            border-radius: 13px;
+            background: linear-gradient(
+                135deg,
+                #7461c9,
+                #b59dff
+            );
+
+            color: #15112c;
+            font-size: 23px;
+            font-weight: 800;
+        }
+
+        .student-brand-name {
+            color: #ffffff;
+            font-size: 16px;
+            font-weight: 800;
+            line-height: 1.3;
+        }
+
+        .student-brand-caption {
+            color: var(--muted);
+            font-size: 11px;
+            margin-top: 4px;
+        }
+
+        .student-nav-title {
+            margin: 29px 12px 13px;
+            color: #8393b2;
+            font-size: 10px;
+            font-weight: 800;
+            letter-spacing: 1.7px;
+            text-transform: uppercase;
+        }
+
+        .student-menu {
+            display: flex;
+            flex-direction: column;
+            gap: 7px;
+        }
+
+        .student-menu a {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+
+            min-height: 46px;
+            padding: 12px 15px;
+
+            border: 1px solid transparent;
+            border-radius: 11px;
+
+            color: #b5c2da;
+            text-decoration: none;
+            font-size: 13px;
+            font-weight: 650;
+
+            transition: background .2s, color .2s;
+        }
+
+        .student-menu a:hover {
+            background: #24324c;
+            color: #ffffff;
+        }
+
+        .student-menu a.active {
+            border-color: #584a8c;
+            background: #302a55;
+            color: #e5dcff;
+        }
+
+        .student-menu-icon {
+            width: 24px;
+            text-align: center;
+            font-size: 17px;
+        }
+
+        .student-sidebar-footer {
+            margin-top: auto;
+            padding-top: 25px;
+        }
+
+        .student-sidebar-profile {
+            padding: 14px;
+            margin-bottom: 13px;
+
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            background: #18263c;
+        }
+
+        .student-sidebar-profile strong {
+            display: block;
+            color: #ffffff;
+            font-size: 12px;
+            overflow-wrap: anywhere;
+        }
+
+        .student-sidebar-profile span {
+            display: block;
+            margin-top: 5px;
+            color: var(--muted);
+            font-size: 11px;
+        }
+
+        .student-logout {
+            display: block;
+            padding: 12px 15px;
+
+            border: 1px solid #80465a;
+            border-radius: 10px;
+
+            background: #402633;
+            color: #ffd2dc;
+
+            text-align: center;
+            text-decoration: none;
+            font-size: 13px;
+            font-weight: 750;
+        }
+
+        .student-logout:hover {
+            background: #57303f;
+        }
+
+        /* =========================================
+           MAIN LAYOUT
+           ========================================= */
+
+        .student-main {
+            min-width: 0;
+            min-height: 100vh;
+            margin-left: 255px;
+        }
+
+        .student-topbar {
+            display: flex;
+            align-items: center;
             justify-content: space-between;
+            gap: 15px;
 
-            align-items: center;
+            min-height: 78px;
+            padding: 17px 34px;
 
-            padding: 0 30px;
-
-            border-bottom: 1px solid #ddd;
+            border-bottom: 1px solid var(--border);
+            background: #111c2f;
         }
 
-
-        .topbar h2 {
-            font-size: 22px;
+        .student-topbar-title {
+            margin: 0;
+            color: #ffffff;
+            font-size: 19px;
+            font-weight: 800;
         }
 
+        .student-topbar-subtitle {
+            display: block;
+            margin-top: 4px;
+            color: var(--muted);
+            font-size: 12px;
+        }
 
-        .student-info {
+        .student-account {
             display: flex;
-
             align-items: center;
-
-            gap: 10px;
-
-            font-size: 14px;
+            gap: 12px;
+            min-width: 0;
         }
 
+        .student-avatar {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
 
-        .avatar {
-            width: 38px;
-            height: 38px;
+            width: 43px;
+            height: 43px;
 
+            border: 1px solid #7364aa;
             border-radius: 50%;
 
-            background: #151a2d;
+            background: #37305d;
+            color: #ffffff;
+            font-size: 17px;
+            font-weight: 800;
+        }
 
-            color: white;
+        .student-account-name {
+            color: #ffffff;
+            font-size: 13px;
+            font-weight: 750;
+            overflow-wrap: anywhere;
+        }
+
+        .student-account-role {
+            color: var(--muted);
+            font-size: 11px;
+            margin-top: 3px;
+        }
+
+        .student-content {
+            width: 100%;
+            max-width: 1550px;
+            margin: 0 auto;
+            padding: 32px;
+        }
+
+        /* =========================================
+           WELCOME
+           ========================================= */
+
+        .student-welcome {
+            position: relative;
+            overflow: hidden;
 
             display: flex;
-
             align-items: center;
+            justify-content: space-between;
+            gap: 25px;
 
-            justify-content: center;
+            margin-bottom: 26px;
+            padding: 34px;
 
-            font-weight: bold;
+            border: 1px solid #5a4d91;
+            border-radius: 20px;
+
+            background: linear-gradient(
+                115deg,
+                #26234a 0%,
+                #373069 58%,
+                #594a96 100%
+            );
         }
 
+        .student-welcome::after {
+            content: "";
+            position: absolute;
+            right: -70px;
+            top: -110px;
 
-        /* =========================================================
-           CONTENT
-        ========================================================= */
+            width: 320px;
+            height: 320px;
 
-        .content {
-            padding: 30px;
+            border: 1px solid rgba(255,255,255,.13);
+            border-radius: 50%;
+
+            pointer-events: none;
         }
 
-
-        .welcome {
-            margin-bottom: 25px;
+        .student-eyebrow {
+            display: inline-block;
+            margin-bottom: 12px;
+            color: #d0c3ff;
+            font-size: 11px;
+            font-weight: 800;
+            letter-spacing: 1.5px;
+            text-transform: uppercase;
         }
 
-
-        .welcome h1 {
-            font-size: 28px;
-
-            margin-bottom: 8px;
+        .student-welcome h1 {
+            margin: 0 0 11px;
+            color: #ffffff;
+            font-size: clamp(25px, 3vw, 34px);
+            font-weight: 800;
+            line-height: 1.25;
         }
 
+        .student-welcome p {
+            margin: 0;
+            color: #e2dbf9;
+            font-size: 13px;
+            line-height: 1.75;
+        }
 
-        .welcome p {
-            color: #666;
+        .student-welcome-date {
+            position: relative;
+            z-index: 1;
 
+            flex-shrink: 0;
+            padding: 16px 20px;
+
+            border: 1px solid rgba(255,255,255,.2);
+            border-radius: 13px;
+
+            background: rgba(255,255,255,.08);
+            color: #ffffff;
+
+            text-align: center;
+        }
+
+        .student-welcome-date strong {
+            display: block;
             font-size: 15px;
         }
 
+        .student-welcome-date span {
+            display: block;
+            margin-top: 5px;
+            color: #e0d7ff;
+            font-size: 12px;
+        }
 
-        /* =========================================================
-           CARDS
-        ========================================================= */
+        /* =========================================
+           STAT CARDS
+           ========================================= */
 
-        .cards {
+        .student-stats {
             display: grid;
-
-            grid-template-columns:
-                repeat(4, 1fr);
-
-            gap: 20px;
-
-            margin-bottom: 30px;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 17px;
+            margin-bottom: 27px;
         }
 
+        .student-stat {
+            min-width: 0;
+            padding: 23px;
 
-        .card {
-            background: white;
+            border: 1px solid var(--border);
+            border-radius: 16px;
 
-            padding: 22px;
-
-            border-radius: 12px;
-
-            box-shadow:
-                0 2px 8px rgba(0, 0, 0, 0.06);
+            background: var(--surface);
+            box-shadow: 0 10px 25px rgba(0,0,0,.1);
         }
 
-
-        .card-title {
-            color: #777;
-
-            font-size: 14px;
-
-            margin-bottom: 10px;
+        .student-stat-top {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            margin-bottom: 18px;
         }
 
-
-        .card-value {
-            font-size: 28px;
-
-            font-weight: bold;
-        }
-
-
-        .next-subject {
-            color: #666;
-
+        .student-stat-label {
+            color: #b0bed5;
             font-size: 12px;
-
-            margin-top: 6px;
+            font-weight: 700;
         }
 
+        .student-stat-icon {
+            display: flex;
+            align-items: center;
+            justify-content: center;
 
-        /* =========================================================
-           SECTION
-        ========================================================= */
+            width: 38px;
+            height: 38px;
+            flex-shrink: 0;
 
-        .section {
-            background: white;
-
-            padding: 25px;
-
-            border-radius: 12px;
-
-            box-shadow:
-                0 2px 8px rgba(0, 0, 0, 0.06);
-
-            margin-bottom: 25px;
+            border-radius: 11px;
+            background: #322c54;
+            color: #c7b8ff;
+            font-size: 18px;
         }
 
-
-        .section h2 {
-            font-size: 20px;
-
-            margin-bottom: 20px;
+        .student-stat-value {
+            color: #ffffff;
+            font-size: 29px;
+            font-weight: 800;
+            line-height: 1.25;
+            overflow-wrap: anywhere;
         }
 
-
-        /* =========================================================
-           TABLE
-        ========================================================= */
-
-        .table-container {
-            overflow-x: auto;
-        }
-
-
-        table {
-            width: 100%;
-
-            border-collapse: collapse;
-
-            min-width: 800px;
-        }
-
-
-        th,
-        td {
-            padding: 14px;
-
-            text-align: left;
-
-            border-bottom: 1px solid #eee;
-        }
-
-
-        th {
-            background: #f7f8fa;
-
-            font-size: 14px;
-        }
-
-
-        td {
-            font-size: 14px;
-        }
-
-
-        .period {
-            font-weight: bold;
-        }
-
-
-        .subject-code {
-            font-weight: bold;
-        }
-
-
-        .subject-name {
-            color: #666;
-
-            font-size: 12px;
-
-            margin-top: 4px;
-        }
-
-
-        .room-type {
-            color: #777;
-
+        .student-stat-foot {
+            margin-top: 9px;
+            color: #91a1bb;
             font-size: 11px;
-
-            margin-top: 4px;
+            line-height: 1.5;
         }
 
+        .student-progress {
+            overflow: hidden;
+            height: 7px;
+            margin-top: 14px;
+            border-radius: 100px;
+            background: #34415b;
+        }
 
-        /* =========================================================
-           STATUS
-        ========================================================= */
+        .student-progress-bar {
+            height: 100%;
+            border-radius: inherit;
+            background: linear-gradient(
+                90deg,
+                #8573e9,
+                #c1afff
+            );
+        }
 
-        .status {
-            display: inline-block;
+        /* =========================================
+           CONTENT PANELS
+           ========================================= */
 
-            padding: 5px 10px;
+        .student-panel {
+            min-width: 0;
+            padding: 26px;
+            margin-bottom: 25px;
 
-            border-radius: 20px;
+            border: 1px solid var(--border);
+            border-radius: 17px;
 
+            background: var(--surface);
+            box-shadow: 0 10px 28px rgba(0,0,0,.1);
+        }
+
+        .student-panel-heading {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 15px;
+
+            margin-bottom: 23px;
+        }
+
+        .student-panel-heading h2 {
+            margin: 0;
+            color: #ffffff;
+            font-size: 20px;
+            font-weight: 800;
+        }
+
+        .student-panel-heading p {
+            margin: 6px 0 0;
+            color: var(--muted);
             font-size: 12px;
         }
 
+        .student-panel-link {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
 
-        .status.completed {
-            background: #e8f5e9;
+            min-height: 38px;
+            padding: 9px 15px;
 
-            color: #2e7d32;
-        }
+            border: 1px solid #695e9a;
+            border-radius: 9px;
 
-
-        .status.ongoing {
-            background: #fff3cd;
-
-            color: #856404;
-        }
-
-
-        .status.upcoming {
-            background: #e3f2fd;
-
-            color: #1565c0;
-        }
-
-
-        /* =========================================================
-           NO CLASSES
-        ========================================================= */
-
-        .no-classes {
-            color: #777;
-
-            font-size: 14px;
-
-            padding: 10px 0;
-        }
-
-
-        /* =========================================================
-           QUICK LINKS
-        ========================================================= */
-
-        .quick-links {
-            display: grid;
-
-            grid-template-columns:
-                repeat(3, 1fr);
-
-            gap: 15px;
-        }
-
-
-        .quick-link {
-            padding: 18px;
-
-            border: 1px solid #eee;
-
-            border-radius: 10px;
+            background: #2d294f;
+            color: #ddd3ff;
 
             text-decoration: none;
-
-            color: #222;
-
-            transition: 0.2s;
+            font-size: 12px;
+            font-weight: 750;
         }
 
-
-        .quick-link:hover {
-            background: #f7f8fa;
-
-            transform: translateY(-2px);
+        .student-panel-link:hover {
+            background: #423765;
         }
 
+        /* =========================================
+           TIMETABLE
+           ========================================= */
 
-        .quick-link strong {
-            display: block;
-
-            margin-bottom: 6px;
+        .student-table-scroll {
+            overflow-x: auto;
+            width: 100%;
+            border: 1px solid var(--border);
+            border-radius: 11px;
         }
 
-
-        .quick-link span {
-            color: #777;
-
+        .student-table {
+            width: 100%;
+            min-width: 820px;
+            border-collapse: collapse;
             font-size: 13px;
         }
 
-
-        /* =========================================================
-           MOBILE
-        ========================================================= */
-
-        @media (max-width: 1100px) {
-
-            .cards {
-                grid-template-columns:
-                    repeat(2, 1fr);
-            }
-
+        .student-table th,
+        .student-table td {
+            padding: 15px 17px;
+            text-align: left;
+            vertical-align: middle;
+            border-bottom: 1px solid #2b3a52;
         }
 
+        .student-table th {
+            background: #24334c;
+            color: #ddd5ff;
+            font-size: 12px;
+            font-weight: 800;
+            white-space: nowrap;
+        }
 
-        @media (max-width: 900px) {
+        .student-table tbody tr:nth-child(even) {
+            background: #1c2a40;
+        }
 
-            .sidebar {
-                width: 200px;
+        .student-table tbody tr:hover {
+            background: #253651;
+        }
+
+        .student-table tbody tr:last-child td {
+            border-bottom: 0;
+        }
+
+        .student-table td {
+            color: #dbe5f4;
+        }
+
+        .student-table strong {
+            color: #ffffff;
+        }
+
+        .student-secondary {
+            display: block;
+            margin-top: 4px;
+            color: #a1afc7;
+            font-size: 11px;
+        }
+
+        .student-period {
+            color: #c4b3ff;
+            font-weight: 800;
+            white-space: nowrap;
+        }
+
+        .student-time {
+            white-space: nowrap;
+            color: #d0dbeb;
+            font-size: 12px;
+        }
+
+        /* =========================================
+           CLASS STATUS
+           ========================================= */
+
+        .student-status {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+
+            padding: 6px 11px;
+            border-radius: 100px;
+
+            font-size: 11px;
+            font-weight: 800;
+            white-space: nowrap;
+        }
+
+        .student-status.completed {
+            border: 1px solid #34695c;
+            background: #1b403b;
+            color: #8be4cb;
+        }
+
+        .student-status.ongoing {
+            border: 1px solid #8b7039;
+            background: #46391e;
+            color: #ffe2a1;
+        }
+
+        .student-status.upcoming {
+            border: 1px solid #5b5393;
+            background: #312c58;
+            color: #cfc2ff;
+        }
+
+        .student-empty {
+            padding: 34px 20px;
+            text-align: center;
+            color: #b0bed5;
+            font-size: 13px;
+        }
+
+        /* =========================================
+           QUICK LINKS
+           ========================================= */
+
+        .student-quick-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 17px;
+        }
+
+        .student-quick-link {
+            display: block;
+            min-width: 0;
+            padding: 22px;
+
+            border: 1px solid #36435e;
+            border-radius: 13px;
+
+            background: #111d30;
+            color: #ffffff;
+            text-decoration: none;
+
+            transition: transform .2s, background .2s;
+        }
+
+        .student-quick-link:hover {
+            transform: translateY(-3px);
+            background: #263451;
+        }
+
+        .student-quick-icon {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+
+            width: 44px;
+            height: 44px;
+            margin-bottom: 16px;
+
+            border-radius: 12px;
+            background: #322c54;
+
+            font-size: 22px;
+        }
+
+        .student-quick-link strong {
+            display: block;
+            margin-bottom: 7px;
+            color: #ffffff;
+            font-size: 14px;
+        }
+
+        .student-quick-link span:last-child {
+            display: block;
+            color: #a6b5cc;
+            font-size: 12px;
+            line-height: 1.7;
+        }
+
+        /* =========================================
+           RESPONSIVE DESIGN
+           ========================================= */
+
+        @media (max-width: 1200px) {
+            .student-stats {
+                grid-template-columns: repeat(2,minmax(0,1fr));
+            }
+        }
+
+        @media (max-width: 950px) {
+            .student-sidebar {
+                width: 210px;
             }
 
-
-            .main {
-                margin-left: 200px;
+            .student-main {
+                margin-left: 210px;
             }
 
+            .student-content {
+                padding: 24px;
+            }
 
-            .quick-links {
+            .student-quick-grid {
                 grid-template-columns: 1fr;
             }
 
+            .student-welcome {
+                align-items: flex-start;
+                flex-direction: column;
+            }
         }
 
-
         @media (max-width: 650px) {
-
-            .sidebar {
+            .student-sidebar {
                 position: relative;
-
                 width: 100%;
-
                 height: auto;
+                padding: 17px;
             }
 
+            .student-brand {
+                padding-bottom: 15px;
+            }
 
-            .main {
+            .student-nav-title {
+                margin: 18px 7px 12px;
+            }
+
+            .student-menu {
+                display: grid;
+                grid-template-columns: repeat(2,minmax(0,1fr));
+            }
+
+            .student-menu a {
+                padding: 10px;
+                font-size: 12px;
+            }
+
+            .student-sidebar-footer {
+                margin-top: 15px;
+                padding-top: 0;
+            }
+
+            .student-main {
                 margin-left: 0;
             }
 
-
-            .logout {
-                position: static;
-
-                margin-top: 20px;
+            .student-topbar {
+                padding: 17px;
             }
 
-
-            .topbar {
-                padding: 0 15px;
+            .student-topbar-title {
+                font-size: 16px;
             }
 
-
-            .content {
-                padding: 15px;
+            .student-account-name {
+                display: none;
             }
 
+            .student-account-role {
+                display: none;
+            }
 
-            .cards {
+            .student-content {
+                padding: 17px;
+            }
+
+            .student-welcome {
+                padding: 24px 20px;
+            }
+
+            .student-stats {
                 grid-template-columns: 1fr;
             }
 
+            .student-panel {
+                padding: 19px;
+            }
         }
-
     </style>
-
 </head>
-
 
 <body>
 
+    <!-- =====================================
+         STUDENT SIDEBAR
+         ===================================== -->
 
-    <!-- =========================================================
-         SIDEBAR
-    ========================================================= -->
+    <aside class="student-sidebar">
 
-    <aside class="sidebar">
+        <div class="student-brand">
 
+            <div class="student-brand-icon">
+                S
+            </div>
 
-        <div class="logo">
+            <div>
+                <div class="student-brand-name">
+                    SmartFaculty
+                </div>
 
-            Smart Faculty Portal
+                <div class="student-brand-caption">
+                    Student Portal
+                </div>
+            </div>
 
         </div>
 
+        <div class="student-nav-title">
+            Navigation
+        </div>
 
-        <ul class="menu">
+        <nav class="student-menu" aria-label="Student navigation">
 
+            <a
+                href="dashboard.php"
+                class="active"
+                aria-current="page"
+            >
+                <span class="student-menu-icon">⌂</span>
+                Dashboard
+            </a>
 
-            <li>
+            <a href="timetable.php">
+                <span class="student-menu-icon">▦</span>
+                Timetable
+            </a>
 
-                <a
-                    href="dashboard.php"
-                    class="active"
-                >
+            <a href="attendance.php">
+                <span class="student-menu-icon">◫</span>
+                Attendance
+            </a>
 
-                    🏠 Dashboard
+            <a href="announcements.php">
+                <span class="student-menu-icon">◉</span>
+                Announcements
+            </a>
 
-                </a>
+            <a href="profile.php">
+                <span class="student-menu-icon">♙</span>
+                My Profile
+            </a>
 
-            </li>
+        </nav>
 
+        <div class="student-sidebar-footer">
 
-            <li>
+            <div class="student-sidebar-profile">
 
-                <a href="timetable.php">
+                <strong>
+                    <?= studentDashEscape($studentName) ?>
+                </strong>
 
-                    📅 Timetable
+                <span>
+                    <?= studentDashEscape($registerNumber) ?>
+                </span>
 
-                </a>
+            </div>
 
-            </li>
-
-
-            <li>
-
-                <a href="attendance.php">
-
-                    📊 Attendance
-
-                </a>
-
-            </li>
-
-
-            <li>
-
-                <a href="announcements.php">
-
-                    📢 Announcements
-
-                </a>
-
-            </li>
-
-
-            <li>
-
-                <a href="profile.php">
-
-                    👤 Profile
-
-                </a>
-
-            </li>
-
-
-        </ul>
-
-
-        <div class="logout">
-
-            <a href="../auth/logout.php">
-
-                Logout
-
+            <a
+                href="../auth/logout.php"
+                class="student-logout"
+            >
+                Log Out
             </a>
 
         </div>
 
-
     </aside>
 
 
+    <!-- =====================================
+         MAIN AREA
+         ===================================== -->
 
-    <!-- =========================================================
-         MAIN
-    ========================================================= -->
-
-    <main class="main">
-
+    <main class="student-main">
 
         <!-- TOP BAR -->
 
-        <header class="topbar">
+        <header class="student-topbar">
 
+            <div>
 
-            <h2>
+                <h2 class="student-topbar-title">
+                    Student Dashboard
+                </h2>
 
-                Student Dashboard
-
-            </h2>
-
-
-            <div class="student-info">
-
-
-                <div class="avatar">
-
-                    <?= htmlspecialchars($firstLetter) ?>
-
-                </div>
-
-
-                <span>
-
-                    <?= htmlspecialchars($username) ?>
-
+                <span class="student-topbar-subtitle">
+                    Your academic overview
                 </span>
-
 
             </div>
 
+            <div class="student-account">
+
+                <div>
+
+                    <div class="student-account-name">
+                        <?= studentDashEscape($username) ?>
+                    </div>
+
+                    <div class="student-account-role">
+                        Student Account
+                    </div>
+
+                </div>
+
+                <div class="student-avatar">
+                    <?= studentDashEscape($firstLetter) ?>
+                </div>
+
+            </div>
 
         </header>
 
 
+        <div class="student-content">
 
-        <!-- =====================================================
-             CONTENT
-        ====================================================== -->
+            <!-- =================================
+                 WELCOME BANNER
+                 ================================= -->
 
-        <div class="content">
+            <section class="student-welcome">
+
+                <div>
+
+                    <span class="student-eyebrow">
+                        Your Learning Space
+                    </span>
+
+                    <h1>
+                        Welcome,
+                        <?= studentDashEscape($studentName) ?>!
+                        👋
+                    </h1>
+
+                    <p>
+                        Section <?= studentDashEscape($sectionName) ?>
+                        &nbsp; • &nbsp;
+                        Register No:
+                        <?= studentDashEscape($registerNumber) ?>
+                    </p>
+
+                </div>
+
+                <div class="student-welcome-date">
+
+                    <strong>
+                        <?= date("l") ?>
+                    </strong>
+
+                    <span>
+                        <?= date("d M Y") ?>
+                    </span>
+
+                </div>
+
+            </section>
 
 
-            <!-- WELCOME -->
-
-            <div class="welcome">
-
-
-                <h1>
-
-                    Welcome,
-
-                    <?= htmlspecialchars($studentName) ?>
-
-                    👋
-
-                </h1>
-
-
-                <p>
-
-                    <?= htmlspecialchars($sectionName) ?>
-
-                    &nbsp;·&nbsp;
-
-                    Register No:
-
-                    <?= htmlspecialchars($registerNumber) ?>
-
-                </p>
-
-
-            </div>
-
-
-
-            <!-- =================================================
+            <!-- =================================
                  SUMMARY CARDS
-            ================================================== -->
+                 ================================= -->
 
-            <div class="cards">
-
+            <section
+                class="student-stats"
+                aria-label="Academic summary"
+            >
 
                 <!-- SECTION -->
 
-                <div class="card">
+                <div class="student-stat">
 
-                    <div class="card-title">
+                    <div class="student-stat-top">
 
-                        My Section
+                        <span class="student-stat-label">
+                            My Section
+                        </span>
+
+                        <div class="student-stat-icon">
+                            ▦
+                        </div>
 
                     </div>
 
+                    <div class="student-stat-value">
+                        <?= studentDashEscape($sectionName) ?>
+                    </div>
 
-                    <div class="card-value">
-
-                        <?= htmlspecialchars($sectionName) ?>
-
+                    <div class="student-stat-foot">
+                        Your assigned class section
                     </div>
 
                 </div>
 
 
+                <!-- TODAY CLASSES -->
 
-                <!-- TODAY'S CLASSES -->
+                <div class="student-stat">
 
-                <div class="card">
+                    <div class="student-stat-top">
 
-                    <div class="card-title">
+                        <span class="student-stat-label">
+                            Today's Classes
+                        </span>
 
-                        Today's Classes
+                        <div class="student-stat-icon">
+                            ◷
+                        </div>
 
                     </div>
 
-
-                    <div class="card-value">
-
+                    <div class="student-stat-value">
                         <?= $todayClassCount ?>
+                    </div>
 
+                    <div class="student-stat-foot">
+                        Published periods scheduled today
                     </div>
 
                 </div>
-
 
 
                 <!-- ATTENDANCE -->
 
-                <div class="card">
+                <div class="student-stat">
 
-                    <div class="card-title">
+                    <div class="student-stat-top">
 
-                        Attendance
+                        <span class="student-stat-label">
+                            My Attendance
+                        </span>
+
+                        <div class="student-stat-icon">
+                            ◫
+                        </div>
 
                     </div>
 
-
-                    <div class="card-value">
-
-                        <?= htmlspecialchars($attendanceDisplay) ?>
-
+                    <div class="student-stat-value">
+                        <?= studentDashEscape($attendanceDisplay) ?>
                     </div>
+
+                    <div class="student-stat-foot">
+                        <?= $presentAttendanceClasses ?>
+                        of
+                        <?= $totalAttendanceClasses ?>
+                        recorded classes attended
+                    </div>
+
+                    <?php if ($attendancePercentage !== null): ?>
+
+                        <div
+                            class="student-progress"
+                            role="progressbar"
+                            aria-label="Attendance percentage"
+                            aria-valuenow="<?= $attendancePercentage ?>"
+                            aria-valuemin="0"
+                            aria-valuemax="100"
+                        >
+
+                            <div
+                                class="student-progress-bar"
+                                style="width: <?= max(
+                                    0,
+                                    min(100, $attendancePercentage)
+                                ) ?>%;"
+                            ></div>
+
+                        </div>
+
+                    <?php endif; ?>
 
                 </div>
-
 
 
                 <!-- NEXT CLASS -->
 
-                <div class="card">
+                <div class="student-stat">
 
-                    <div class="card-title">
+                    <div class="student-stat-top">
 
-                        Next Class
+                        <span class="student-stat-label">
+                            Next / Current Class
+                        </span>
+
+                        <div class="student-stat-icon">
+                            ◈
+                        </div>
 
                     </div>
 
-
-                    <div class="card-value">
-
-                        <?= htmlspecialchars($nextClassPeriod) ?>
-
+                    <div class="student-stat-value">
+                        <?= studentDashEscape($nextClassPeriod) ?>
                     </div>
 
-
-                    <div class="next-subject">
-
-                        <?= htmlspecialchars($nextClassSubject) ?>
-
+                    <div class="student-stat-foot">
+                        <?= studentDashEscape($nextClassSubject) ?>
                     </div>
 
                 </div>
 
-
-            </div>
-
+            </section>
 
 
-            <!-- =================================================
-                 TODAY'S CLASSES
-            ================================================== -->
+            <!-- =================================
+                 TODAY'S TIMETABLE
+                 ================================= -->
 
-            <div class="section">
+            <section class="student-panel">
 
+                <div class="student-panel-heading">
 
-                <h2>
+                    <div>
 
-                    📅 Today's Classes
+                        <h2>
+                            Today's Classes
+                        </h2>
 
-                </h2>
+                        <p>
+                            <?= studentDashEscape(
+                                ucfirst(strtolower($todayDay))
+                            ) ?>
+                            •
+                            <?= $todayClassCount ?>
+                            scheduled period<?= $todayClassCount === 1
+                                ? ""
+                                : "s" ?>
+                        </p>
 
+                    </div>
 
-                <?php if (count($todayClasses) > 0): ?>
+                    <a
+                        href="timetable.php"
+                        class="student-panel-link"
+                    >
+                        View Full Timetable →
+                    </a>
 
+                </div>
 
-                    <div class="table-container">
+                <?php if ($todayClassCount > 0): ?>
 
+                    <div class="student-table-scroll">
 
-                        <table>
-
+                        <table class="student-table">
 
                             <thead>
 
                                 <tr>
-
-                                    <th>
-
-                                        Period
-
-                                    </th>
-
-                                    <th>
-
-                                        Time
-
-                                    </th>
-
-                                    <th>
-
-                                        Subject
-
-                                    </th>
-
-                                    <th>
-
-                                        Faculty
-
-                                    </th>
-
-                                    <th>
-
-                                        Room
-
-                                    </th>
-
-                                    <th>
-
-                                        Status
-
-                                    </th>
-
+                                    <th>Period</th>
+                                    <th>Time</th>
+                                    <th>Subject</th>
+                                    <th>Faculty</th>
+                                    <th>Room</th>
+                                    <th>Status</th>
                                 </tr>
 
                             </thead>
 
-
                             <tbody>
 
-
-                                <?php foreach ($todayClasses as $class): ?>
-
+                                <?php foreach (
+                                    $todayClasses as $class
+                                ): ?>
 
                                     <?php
 
-                                    $classStatus = getClassStatus(
-                                        $class['start_time'],
-                                        $class['end_time']
+                                    $classStatus = studentDashClassStatus(
+                                        $class["start_time"],
+                                        $class["end_time"]
                                     );
 
-                                    $statusClass =
-                                        strtolower($classStatus);
+                                    $statusClass = strtolower(
+                                        $classStatus
+                                    );
 
                                     ?>
 
-
                                     <tr>
 
-
-                                        <!-- PERIOD -->
-
-                                        <td class="period">
-
-                                            P<?= htmlspecialchars(
-                                                $class['period_number']
-                                            ) ?>
-
+                                        <td>
+                                            <span class="student-period">
+                                                P<?= (int)$class["period_number"] ?>
+                                            </span>
                                         </td>
 
-
-
-                                        <!-- TIME -->
+                                        <td class="student-time">
+                                            <?= studentDashTime(
+                                                $class["start_time"]
+                                            ) ?>
+                                            –
+                                            <?= studentDashTime(
+                                                $class["end_time"]
+                                            ) ?>
+                                        </td>
 
                                         <td>
 
-                                            <?= htmlspecialchars(
-                                                $class['start_time']
-                                            ) ?>
-
-                                            -
-
-                                            <?= htmlspecialchars(
-                                                $class['end_time']
-                                            ) ?>
-
-                                        </td>
-
-
-
-                                        <!-- SUBJECT -->
-
-                                        <td>
-
-                                            <div class="subject-code">
-
-                                                <?= htmlspecialchars(
-                                                    $class['subject_code']
+                                            <strong>
+                                                <?= studentDashEscape(
+                                                    $class["subject_code"]
                                                 ) ?>
+                                            </strong>
 
-                                            </div>
-
-
-                                            <div class="subject-name">
-
-                                                <?= htmlspecialchars(
-                                                    $class['subject_name']
+                                            <span class="student-secondary">
+                                                <?= studentDashEscape(
+                                                    $class["subject_name"]
                                                 ) ?>
-
-                                            </div>
-
-                                        </td>
-
-
-
-                                        <!-- FACULTY -->
-
-                                        <td>
-
-                                            <?= htmlspecialchars(
-                                                $class['faculty_name']
-                                            ) ?>
-
-                                        </td>
-
-
-
-                                        <!-- ROOM -->
-
-                                        <td>
-
-                                            <?= htmlspecialchars(
-                                                $class['room_number']
-                                            ) ?>
-
-
-                                            <div class="room-type">
-
-                                                <?= htmlspecialchars(
-                                                    $class['room_type']
-                                                ) ?>
-
-                                            </div>
-
-                                        </td>
-
-
-
-                                        <!-- STATUS -->
-
-                                        <td>
-
-                                            <span
-                                                class="status <?= htmlspecialchars(
-                                                    $statusClass
-                                                ) ?>"
-                                            >
-
-                                                <?= htmlspecialchars(
-                                                    $classStatus
-                                                ) ?>
-
                                             </span>
 
                                         </td>
 
+                                        <td>
+                                            <?= studentDashEscape(
+                                                $class["faculty_name"]
+                                            ) ?>
+                                        </td>
+
+                                        <td>
+
+                                            <strong>
+                                                <?= studentDashEscape(
+                                                    $class["room_number"]
+                                                ) ?>
+                                            </strong>
+
+                                            <span class="student-secondary">
+                                                <?= studentDashEscape(
+                                                    $class["room_type"]
+                                                ) ?>
+                                            </span>
+
+                                        </td>
+
+                                        <td>
+
+                                            <span
+                                                class="student-status <?= studentDashEscape(
+                                                    $statusClass
+                                                ) ?>"
+                                            >
+                                                <?= studentDashEscape(
+                                                    $classStatus
+                                                ) ?>
+                                            </span>
+
+                                        </td>
 
                                     </tr>
 
-
                                 <?php endforeach; ?>
-
 
                             </tbody>
 
-
                         </table>
-
 
                     </div>
 
-
                 <?php else: ?>
 
-
-                    <p class="no-classes">
-
-                        No classes scheduled for today.
-
-                    </p>
-
+                    <div class="student-empty">
+                        No published classes scheduled for today.
+                        Check the weekly timetable for other days.
+                    </div>
 
                 <?php endif; ?>
 
-
-            </div>
-
+            </section>
 
 
-            <!-- =================================================
+            <!-- =================================
                  QUICK ACCESS
-            ================================================== -->
+                 ================================= -->
 
-            <div class="section">
+            <section class="student-panel">
 
+                <div class="student-panel-heading">
 
-                <h2>
+                    <div>
 
-                    Quick Access
+                        <h2>
+                            Quick Access
+                        </h2>
 
-                </h2>
+                        <p>
+                            Jump straight into your academic tools.
+                        </p>
 
+                    </div>
 
-                <div class="quick-links">
+                </div>
 
+                <div class="student-quick-grid">
 
                     <a
                         href="timetable.php"
-                        class="quick-link"
+                        class="student-quick-link"
                     >
 
+                        <div class="student-quick-icon">
+                            ▦
+                        </div>
+
                         <strong>
-
-                            📅 View Timetable
-
+                            View Timetable
                         </strong>
 
-
                         <span>
-
-                            Check your daily and weekly timetable.
-
+                            See your subjects, classrooms,
+                            faculty and weekly schedule.
                         </span>
 
                     </a>
-
 
 
                     <a
                         href="attendance.php"
-                        class="quick-link"
+                        class="student-quick-link"
                     >
 
+                        <div class="student-quick-icon">
+                            ◫
+                        </div>
+
                         <strong>
-
-                            📊 View Attendance
-
+                            My Attendance
                         </strong>
 
-
                         <span>
-
-                            Check your subject-wise attendance.
-
+                            Check your attendance records
+                            and subject-wise percentages.
                         </span>
 
                     </a>
-
 
 
                     <a
                         href="announcements.php"
-                        class="quick-link"
+                        class="student-quick-link"
                     >
 
+                        <div class="student-quick-icon">
+                            ◉
+                        </div>
+
                         <strong>
-
-                            📢 Announcements
-
+                            Announcements
                         </strong>
 
-
                         <span>
-
-                            View the latest portal announcements.
-
+                            Read the latest notices and
+                            announcements from your department.
                         </span>
 
                     </a>
 
-
                 </div>
 
-
-            </div>
-
+            </section>
 
         </div>
 
-
     </main>
 
-
 </body>
-
-</html><script>
-    // Automatically refresh dashboard every 60 seconds
-    setInterval(function () {
-        location.reload();
-    }, 60000);
-</script>
+</html>

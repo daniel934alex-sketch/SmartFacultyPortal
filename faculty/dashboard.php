@@ -159,7 +159,7 @@ $initial = strtoupper(substr($username, 0, 1));
             <section class="fd-hero">
                 <div class="fd-hero-content">
                     <span class="fd-hero-eyebrow">
-                        ✦ YOUR FACULTY WORKSPACE
+                        YOUR FACULTY WORKSPACE
                     </span>
 
                     <h1>Welcome back, <?= $username ?>!</h1>
@@ -307,7 +307,7 @@ $initial = strtoupper(substr($username, 0, 1));
 
                     <div class="fd-panel">
                         <div class="fd-panel-heading">
-                            <span class="fd-panel-icon">✦</span>
+                            <span class="fd-panel-icon"></span>
                             <h3>Stay Connected</h3>
                         </div>
 

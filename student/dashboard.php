@@ -217,23 +217,39 @@ $todayClassCount = count($todayClasses);
 
 $currentTime = date("H:i:s");
 
+$currentClass = null;
 $nextClass = null;
 
 foreach ($todayClasses as $class) {
+    $start = $class["start_time"];
+    $end = $class["end_time"];
 
-    if ($currentTime < $class["end_time"]) {
+    // Current class: current time is within this period.
+    if ($currentTime >= $start && $currentTime < $end) {
+        $currentClass = $class;
+        break;
+    }
+
+    // Next class: first period that has not started yet.
+    if ($currentTime < $start) {
         $nextClass = $class;
         break;
     }
 }
 
-$nextClassPeriod = $nextClass
-    ? "P" . $nextClass["period_number"]
+$displayClass = $currentClass ?? $nextClass;
+
+$nextClassPeriod = $displayClass
+    ? "P" . $displayClass["period_number"]
     : "—";
 
-$nextClassSubject = $nextClass
-    ? $nextClass["subject_code"]
+$nextClassSubject = $displayClass
+    ? $displayClass["subject_code"]
     : "No more classes";
+
+$nextClassLabel = $currentClass
+    ? "Current Class"
+    : ($nextClass ? "Next Class" : "No Upcoming Class");
 
 function studentDashClassStatus($startTime, $endTime)
 {
@@ -1382,7 +1398,7 @@ function studentDashTime($time)
                     <div class="student-stat-top">
 
                         <span class="student-stat-label">
-                            Next / Current Class
+                            <?= studentDashEscape($nextClassLabel) ?>
                         </span>
 
                         <div class="student-stat-icon">
@@ -1664,5 +1680,14 @@ function studentDashTime($time)
 
     </main>
 
+<script>
+    // Refresh dashboard every 30 seconds to keep the time-based
+    // class status and dashboard information current.
+    setInterval(() => {
+        if (document.visibilityState === "visible") {
+            window.location.reload();
+        }
+    }, 30000);
+</script>
 </body>
 </html>

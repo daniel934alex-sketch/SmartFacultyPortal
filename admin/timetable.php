@@ -88,12 +88,21 @@ $result = $conn->query($sql);
 
         </div>
 
-        <a
-            href="timetable-add.php"
-            class="btn btn-primary"
-        >
-            + Add Timetable
-        </a>
+        <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+            <a
+                href="timetable-upload.php"
+                class="btn btn-secondary"
+                style="background: #252b47; border: 1px solid #554988; color: #ded4ff;"
+            >
+                ⬆ Upload Timetable
+            </a>
+            <a
+                href="timetable-add.php"
+                class="btn btn-primary"
+            >
+                + Add Timetable
+            </a>
+        </div>
 
     </div>
 

@@ -95,6 +95,16 @@
         </a>
 
 
+        <!-- Upload Timetable -->
+
+        <a
+            href="../admin/timetable-upload.php"
+            class="sidebar-link"
+        >
+            Upload Timetable
+        </a>
+
+
         <!-- Handovers -->
 
         <a

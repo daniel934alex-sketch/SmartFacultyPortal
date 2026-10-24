@@ -1,1891 +1,1576 @@
-<?php
 
+<?php
 session_start();
 
-if (!isset($_SESSION['user_id'])) {
-    header("Location: ../auth/login.php");
+if (
+    !isset($_SESSION['user_id']) ||
+    !isset($_SESSION['role']) ||
+    strtoupper((string)$_SESSION['role']) !== 'FACULTY'
+) {
+    header('Location: ../auth/login.php');
     exit;
 }
 
-if (!isset($_SESSION['role']) || strtoupper($_SESSION['role']) !== 'FACULTY') {
-    header("Location: ../auth/login.php");
-    exit;
-}
+$username = htmlspecialchars(
+    (string)($_SESSION['username'] ?? 'Faculty'),
+    ENT_QUOTES,
+    'UTF-8'
+);
 
+$initial = htmlspecialchars(
+    strtoupper(substr((string)($_SESSION['username'] ?? 'F'), 0, 1)),
+    ENT_QUOTES,
+    'UTF-8'
+);
+
+$periods = [
+    1 => '08:30 AM - 09:15 AM',
+    2 => '09:15 AM - 10:00 AM',
+    3 => '10:00 AM - 10:45 AM',
+    4 => '11:00 AM - 11:45 AM',
+    5 => '11:45 AM - 12:30 PM',
+    6 => '12:30 PM - 01:15 PM',
+    7 => '02:00 PM - 02:45 PM',
+    8 => '02:45 PM - 03:30 PM',
+    9 => '03:45 PM - 04:30 PM',
+];
 ?>
-
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Faculty Availability | Smart Faculty</title>
 
-    <meta charset="UTF-8">
+<style>
+* {
+    box-sizing: border-box;
+}
 
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+body.av-page {
+    margin: 0;
+    min-height: 100vh;
+    background: #0c1220;
+    color: #eff2ff;
+    font-family: Inter, "Segoe UI", Arial, sans-serif;
+}
 
-    <title>Faculty Availability</title>
+.av-page button,
+.av-page input {
+    font: inherit;
+}
 
-    <style>
+.av-page a {
+    text-decoration: none;
+    color: inherit;
+}
 
-        * {
-            box-sizing: border-box;
-        }
+.av-page [hidden] {
+    display: none !important;
+}
 
-        body {
-            margin: 0;
-            padding: 0;
-            font-family: Arial, sans-serif;
-            background: #f4f6f9;
-        }
+/* LAYOUT */
 
-        .container {
-            width: 80%;
-            max-width: 1000px;
-            margin: 40px auto;
-            background: white;
-            padding: 30px;
-            border-radius: 10px;
-            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
-        }
+.av-layout {
+    display: flex;
+    min-height: 100vh;
+}
 
-        h1 {
-            margin-top: 0;
-            color: #222;
-        }
+/* SIDEBAR */
 
-        .description {
-            color: #555;
-            margin-bottom: 25px;
-        }
+.av-sidebar {
+    position: sticky;
+    top: 0;
+    z-index: 30;
+    display: flex;
+    flex-direction: column;
+    flex: 0 0 264px;
+    height: 100vh;
+    overflow-y: auto;
+    padding: 28px 17px 22px;
+    background: #111a2b;
+    border-right: 1px solid #2a364b;
+}
 
-        .date-section {
-            margin-bottom: 25px;
-        }
+.av-brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 0 7px 45px;
+    color: #fff;
+}
 
-        .date-section label {
-            font-weight: bold;
-            margin-right: 10px;
-        }
+.av-logo {
+    display: grid;
+    place-items: center;
+    flex: 0 0 44px;
+    width: 44px;
+    height: 44px;
+    border-radius: 13px;
+    background: linear-gradient(135deg, #a58aff, #6550cc);
+    font-size: 24px;
+    font-weight: 800;
+}
 
-        #availabilityDate {
-            padding: 9px 12px;
-            border: 1px solid #ccc;
-            border-radius: 5px;
-            font-size: 14px;
-        }
+.av-brand strong {
+    display: block;
+    font-size: 15px;
+}
 
-        .period {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            background: #f8f9fa;
-            border: 1px solid #e1e4e8;
-            padding: 18px;
-            margin-bottom: 12px;
-            border-radius: 8px;
-        }
+.av-brand small {
+    display: block;
+    margin-top: 5px;
+    color: #9dabc2;
+    font-size: 9px;
+    letter-spacing: 1.5px;
+}
 
-        .period-info {
-            display: flex;
-            flex-direction: column;
-            gap: 6px;
-        }
+.av-nav-label {
+    margin: 0 14px 15px;
+    color: #687991;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 1.6px;
+}
 
-        .period-number {
-            font-size: 17px;
-            font-weight: bold;
-            color: #222;
-        }
+.av-nav-label.av-spaced {
+    margin-top: 27px;
+}
 
-        .period-time {
-            font-size: 14px;
-            color: #666;
-        }
+.av-nav {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
 
-        .buttons {
-            display: flex;
-            gap: 8px;
-        }
+.av-nav a {
+    display: flex;
+    align-items: center;
+    gap: 13px;
+    padding: 13px 14px;
+    border: 1px solid transparent;
+    border-radius: 11px;
+    color: #98a6bc;
+    font-size: 13px;
+    transition: background .2s, color .2s;
+}
 
-        .buttons button {
-            border: none;
-            padding: 10px 14px;
-            border-radius: 5px;
-            color: white;
-            cursor: pointer;
-            font-weight: bold;
-            font-size: 12px;
-        }
+.av-nav a:hover {
+    background: #202c41;
+    color: #fff;
+}
 
-        .attend-btn {
-            background: #16803c;
-        }
+.av-nav a.active {
+    background: #302b53;
+    border-color: #50467c;
+    color: #e2d9ff;
+    font-weight: 700;
+}
 
-        .attend-btn:hover {
-            background: #116b31;
-        }
+.av-nav-icon {
+    width: 20px;
+    text-align: center;
+    font-size: 18px;
+}
 
-        .cant-btn {
-            background: #a71930;
-        }
+.av-side-bottom {
+    margin-top: auto;
+    padding-top: 35px;
+}
 
-        .cant-btn:hover {
-            background: #871426;
-        }
+.av-side-note {
+    padding: 18px;
+    border: 1px solid #3b375f;
+    border-radius: 14px;
+    background: linear-gradient(145deg, #2b294e, #1a2440);
+}
 
-        .leave-btn {
-            background: #a36b00;
-        }
+.av-side-note strong {
+    font-size: 13px;
+}
 
-        .leave-btn:hover {
-            background: #855700;
-        }
+.av-side-note p {
+    margin: 8px 0 0;
+    color: #a7b0ca;
+    font-size: 11px;
+    line-height: 1.7;
+}
 
-        .class-box {
-            margin-top: 25px;
-            padding: 20px;
-            border-radius: 8px;
-            background: #eef6ff;
-            border: 1px solid #b8d8ff;
-            display: none;
-        }
+.av-logout {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    margin-top: 17px;
+    padding: 13px 14px;
+    border-radius: 10px;
+    color: #f1a4b1 !important;
+    font-size: 13px;
+}
 
-        .class-box h3 {
-            margin-top: 0;
-            color: #174a7e;
-        }
+.av-logout:hover {
+    background: #422536;
+}
 
-        .class-details {
-            line-height: 1.8;
-            color: #333;
-        }
+/* TOPBAR */
 
-        .handover-btn {
-            margin-top: 15px;
-            padding: 11px 18px;
-            background: #7b2cbf;
-            color: white;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-            font-weight: bold;
-        }
+.av-content {
+    min-width: 0;
+    flex: 1;
+}
 
-        .handover-btn:hover {
-            background: #60209a;
-        }
+.av-topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 91px;
+    gap: 15px;
+    padding: 17px 35px;
+    border-bottom: 1px solid #2a364b;
+    background: #111a2b;
+}
 
-        .faculty-box {
-            margin-top: 20px;
-            padding: 20px;
-            background: #f8f9fa;
-            border: 1px solid #ddd;
-            border-radius: 8px;
-            display: none;
-        }
+.av-topbar-label,
+.av-eyebrow {
+    display: block;
+    color: #ac98ff;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 1.6px;
+}
 
-        .faculty-box h3 {
-            margin-top: 0;
-            color: #222;
-        }
+.av-topbar h2 {
+    margin: 5px 0 0;
+    font-size: 20px;
+}
 
-        .faculty-count {
-            margin-bottom: 15px;
-            color: #555;
-            font-weight: bold;
-        }
+.av-account {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
 
-        .faculty-item {
-            background: white;
-            border: 1px solid #ddd;
-            padding: 15px;
-            margin-bottom: 10px;
-            border-radius: 6px;
-        }
+.av-avatar {
+    display: grid;
+    place-items: center;
+    width: 42px;
+    height: 42px;
+    border-radius: 13px;
+    background: #393060;
+    color: #e8deff;
+    font-weight: 800;
+}
 
-        .faculty-item strong {
-            color: #222;
-            font-size: 16px;
-        }
+.av-account strong {
+    display: block;
+    font-size: 13px;
+}
 
-        .faculty-item span {
-            color: #555;
-        }
+.av-account small {
+    display: block;
+    margin-top: 5px;
+    color: #96a4bc;
+    font-size: 11px;
+}
 
-        .send-btn {
-            margin-top: 15px;
-            padding: 11px 18px;
-            background: #16803c;
-            color: white;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-            font-weight: bold;
-        }
+.av-menu {
+    display: none;
+    cursor: pointer;
+    border: 1px solid #3d4860;
+    border-radius: 9px;
+    background: #263248;
+    color: #fff;
+    padding: 9px 12px;
+}
 
-        .send-btn:hover {
-            background: #116b31;
-        }
+/* MAIN CONTENT */
 
-        .send-btn:disabled {
-            background: #777;
-            cursor: not-allowed;
-        }
+.av-main {
+    width: min(1230px, 100%);
+    margin: auto;
+    padding: 34px;
+}
 
-        .info-message {
-            padding: 12px;
-            background: #fff8e1;
-            border: 1px solid #f0d98c;
-            border-radius: 5px;
-            color: #795600;
-        }
+/* WELCOME BANNER */
 
-        .success-message {
-            padding: 12px;
-            background: #e8f5e9;
-            border: 1px solid #a5d6a7;
-            border-radius: 5px;
-            color: #256029;
-        }
+.av-hero {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    overflow: hidden;
+    gap: 25px;
+    min-height: 228px;
+    padding: 36px 42px;
+    border: 1px solid #51478c;
+    border-radius: 21px;
+    background: linear-gradient(
+        115deg,
+        #28244e,
+        #39316e 55%,
+        #5c4da0
+    );
+}
 
-        @media (max-width: 700px) {
+.av-hero > div:first-child {
+    position: relative;
+    z-index: 1;
+}
 
-            .container {
-                width: 95%;
-                padding: 20px;
-            }
+.av-hero h1 {
+    margin: 12px 0;
+    font-size: clamp(26px, 3vw, 36px);
+}
 
-            .period {
-                flex-direction: column;
-                align-items: flex-start;
-                gap: 15px;
-            }
+.av-hero p {
+    max-width: 565px;
+    margin: 0;
+    color: #d2cfea;
+    font-size: 13px;
+    line-height: 1.85;
+}
 
-            .buttons {
-                width: 100%;
-                flex-wrap: wrap;
-            }
+.av-back {
+    display: inline-flex;
+    margin-top: 22px;
+    padding: 12px 18px;
+    border-radius: 10px;
+    background: #b0a0ff;
+    color: #191331 !important;
+    font-size: 12px;
+    font-weight: 800;
+}
 
-            .buttons button {
-                flex: 1;
-            }
+.av-hero-art {
+    display: grid;
+    place-items: center;
+    flex: 0 0 130px;
+    width: 130px;
+    height: 130px;
+    border: 1px solid #ffffff45;
+    border-radius: 30px;
+    background: #ffffff1a;
+    font-size: 65px;
+    transform: rotate(-8deg);
+}
 
-        }
+/* DATE SELECTOR */
 
-    </style>
+.av-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 15px;
+    margin: 25px 0 30px;
+    padding: 20px 23px;
+    background: #172235;
+    border: 1px solid #2a364b;
+    border-radius: 15px;
+}
 
+.av-date-label {
+    display: block;
+    margin-bottom: 10px;
+    color: #a8b6cb;
+    font-size: 11px;
+    font-weight: 750;
+    letter-spacing: .5px;
+}
+
+#availabilityDate {
+    color: #f3f4ff;
+    color-scheme: dark;
+    background: #101a2b;
+    border: 1px solid #3c4b65;
+    border-radius: 9px;
+    padding: 11px 13px;
+    font-size: 14px;
+}
+
+.av-toolbar-hint {
+    color: #97a8c3;
+    font-size: 12px;
+    line-height: 1.7;
+}
+
+.av-toolbar-hint strong {
+    display: block;
+    color: #f3f4ff;
+    font-size: 16px;
+}
+
+/* PERIOD SECTION */
+
+.av-heading {
+    display: flex;
+    align-items: end;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 19px;
+}
+
+.av-heading h2 {
+    margin: 8px 0 6px;
+    font-size: 23px;
+}
+
+.av-heading p {
+    margin: 0;
+    color: #96a4bc;
+    font-size: 13px;
+}
+
+.av-count {
+    padding: 9px 12px;
+    border: 1px solid #35435c;
+    border-radius: 9px;
+    color: #bcc6da;
+    font-size: 11px;
+    white-space: nowrap;
+}
+
+.av-periods {
+    display: grid;
+    gap: 13px;
+}
+
+.av-period {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 18px;
+    padding: 18px 22px;
+    border: 1px solid #2a364b;
+    border-radius: 14px;
+    background: #172235;
+    transition: border-color .2s, background .2s;
+}
+
+.av-period:hover {
+    border-color: #62588d;
+    background: #1a2740;
+}
+
+.av-period-left {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+}
+
+.av-period-icon {
+    display: grid;
+    place-items: center;
+    flex: 0 0 45px;
+    width: 45px;
+    height: 45px;
+    border-radius: 12px;
+    background: #393155;
+    color: #c0adff;
+    font-size: 22px;
+}
+
+.av-period-number {
+    font-size: 15px;
+    font-weight: 750;
+}
+
+.av-period-time {
+    margin-top: 6px;
+    color: #9caac0;
+    font-size: 12px;
+}
+
+.av-selected {
+    display: inline-block;
+    margin-top: 7px;
+    color: #a7bbd8;
+    font-size: 11px;
+}
+
+.av-selected:empty {
+    display: none;
+}
+
+/* AVAILABILITY BUTTONS */
+
+.av-actions {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 9px;
+}
+
+.av-actions button {
+    padding: 11px 13px;
+    border-radius: 9px;
+    border: 1px solid transparent;
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: 800;
+    transition: filter .15s, transform .15s;
+}
+
+.av-actions button:hover {
+    filter: brightness(1.12);
+    transform: translateY(-1px);
+}
+
+.av-actions button:disabled {
+    opacity: .6;
+    cursor: wait;
+    transform: none;
+}
+
+.av-attend {
+    background: #184d3b;
+    color: #88edbd;
+    border-color: #296d55 !important;
+}
+
+.av-cant {
+    background: #502d3d;
+    color: #ffb7c8;
+    border-color: #76445b !important;
+}
+
+.av-leave {
+    background: #514027;
+    color: #ffd38d;
+    border-color: #775b35 !important;
+}
+
+.av-actions button.is-selected {
+    outline: 2px solid #d3c7ff;
+    outline-offset: 2px;
+}
+
+/* HANDOVER PANELS */
+
+.av-panel {
+    margin-top: 25px;
+    padding: 24px;
+    border: 1px solid #354360;
+    border-radius: 16px;
+    background: #172235;
+}
+
+.av-panel h3 {
+    margin: 0 0 16px;
+    font-size: 18px;
+}
+
+.av-panel p {
+    font-size: 13px;
+    line-height: 1.75;
+}
+
+#classBox,
+#facultyBox {
+    display: none;
+}
+
+.av-details-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 11px;
+}
+
+.av-detail {
+    min-width: 0;
+    padding: 13px 15px;
+    background: #1d2b43;
+    border: 1px solid #32425b;
+    border-radius: 10px;
+}
+
+.av-detail span {
+    display: block;
+    margin-bottom: 7px;
+    color: #9cadc6;
+    font-size: 11px;
+}
+
+.av-detail strong {
+    font-size: 13px;
+    overflow-wrap: anywhere;
+}
+
+.av-primary,
+.av-send {
+    margin-top: 17px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 0;
+    border-radius: 10px;
+    padding: 12px 18px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 800;
+}
+
+.av-primary {
+    background: #b5a3ff;
+    color: #211a44;
+}
+
+.av-send {
+    background: #70dbad;
+    color: #102f26;
+}
+
+.av-send:disabled {
+    opacity: .65;
+    cursor: not-allowed;
+}
+
+.av-faculty-count {
+    margin: 0 0 16px;
+    color: #abbad0;
+    font-size: 13px;
+}
+
+.av-faculty-list {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.av-faculty-item {
+    padding: 17px;
+    border: 1px solid #34445e;
+    border-radius: 11px;
+    background: #1c2a40;
+    overflow-wrap: anywhere;
+}
+
+.av-faculty-item > strong {
+    display: block;
+    margin-bottom: 10px;
+    color: #f0eaff;
+    font-size: 15px;
+}
+
+.av-faculty-item p {
+    margin: 5px 0;
+    color: #aab9d0;
+    font-size: 12px;
+}
+
+.av-faculty-item b {
+    color: #d6dff1;
+}
+
+.av-pill {
+    display: inline-block;
+    margin-top: 9px;
+    padding: 5px 9px;
+    border-radius: 20px;
+    background: #1d493c;
+    color: #8ce8b5;
+    font-size: 11px;
+}
+
+/* MESSAGES */
+
+.av-notice {
+    margin: 0 0 20px;
+    padding: 13px 16px;
+    border: 1px solid #4b5480;
+    border-radius: 11px;
+    background: #242e50;
+    color: #e5e5ff;
+    font-size: 13px;
+    line-height: 1.6;
+}
+
+.av-notice.error {
+    background: #402936;
+    border-color: #854455;
+    color: #ffc2cf;
+}
+
+.av-notice.success {
+    background: #1a3b32;
+    border-color: #2d775d;
+    color: #8ee4bd;
+}
+
+.av-info {
+    padding: 12px;
+    border-radius: 9px;
+    border: 1px solid #765f37;
+    background: #382f26;
+    color: #f5d79a;
+    font-size: 12px;
+}
+
+/* FOOTER */
+
+.av-footer {
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-top: 40px;
+    padding: 22px 0;
+    border-top: 1px solid #2a364b;
+    color: #77879e;
+    font-size: 11px;
+}
+
+.av-page a:focus-visible,
+.av-page button:focus-visible,
+.av-page input:focus-visible {
+    outline: 3px solid #b6a5ff;
+    outline-offset: 3px;
+}
+
+/* RESPONSIVE DESIGN */
+
+@media (max-width: 1100px) {
+    .av-sidebar {
+        flex-basis: 235px;
+    }
+
+    .av-main {
+        padding: 28px;
+    }
+
+    .av-toolbar {
+        gap: 25px;
+    }
+}
+
+@media (max-width: 760px) {
+    .av-sidebar {
+        position: fixed;
+        left: 0;
+        top: 0;
+        width: 270px;
+        max-width: 85vw;
+        height: 100dvh;
+        transform: translateX(-100%);
+        transition: transform .25s;
+    }
+
+    .av-sidebar.open {
+        transform: translateX(0);
+    }
+
+    .av-menu {
+        display: inline-block;
+    }
+
+    .av-topbar {
+        min-height: 76px;
+        padding: 15px 20px;
+    }
+
+    .av-account-text {
+        display: none;
+    }
+
+    .av-main {
+        padding: 20px 16px;
+    }
+
+    .av-hero {
+        min-height: 0;
+        padding: 29px 24px;
+    }
+
+    .av-hero-art {
+        display: none;
+    }
+
+    .av-period {
+        align-items: flex-start;
+    }
+
+    .av-actions {
+        width: 100%;
+    }
+
+    .av-actions button {
+        flex: 1;
+    }
+
+    .av-details-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .av-faculty-list {
+        grid-template-columns: 1fr;
+    }
+
+    .av-overlay:not([hidden]) {
+        display: block;
+        position: fixed;
+        z-index: 25;
+        inset: 0;
+        border: 0;
+        background: #000b;
+    }
+}
+
+@media (max-width: 450px) {
+    .av-heading {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .av-detail {
+        padding: 11px;
+    }
+
+    .av-details-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .av-actions {
+        gap: 6px;
+    }
+
+    .av-actions button {
+        font-size: 10px;
+        padding: 11px 8px;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .av-page *,
+    .av-page *::before,
+    .av-page *::after {
+        transition-duration: .01ms !important;
+    }
+}
+</style>
 </head>
 
+<body class="av-page">
 
-<body>
+<div class="av-layout">
 
+    <!-- SIDEBAR -->
+    <aside class="av-sidebar" id="avSidebar">
 
-<div class="container">
+        <a class="av-brand" href="dashboard.php">
+            <span class="av-logo">S</span>
+            <span>
+                <strong>Smart Faculty</strong>
+                <small>ASSISTANT PORTAL</small>
+            </span>
+        </a>
 
+        <div class="av-nav-label">MAIN MENU</div>
 
-    <h1>
-        Faculty Availability
-    </h1>
+        <nav class="av-nav" aria-label="Faculty navigation">
+            <a href="dashboard.php">
+                <span class="av-nav-icon">▦</span>
+                Dashboard
+            </a>
 
+            <a href="timetable.php">
+                <span class="av-nav-icon">▤</span>
+                My Timetable
+            </a>
 
-    <p class="description">
-        Select your availability for each period.
-    </p>
+            <a href="notifications.php">
+                <span class="av-nav-icon">♧</span>
+                Notifications
+            </a>
 
+            <a href="profile.php">
+                <span class="av-nav-icon">♙</span>
+                My Profile
+            </a>
 
-    <!-- DATE -->
-
-    <div class="date-section">
-
-        <label for="availabilityDate">
-            Date:
-        </label>
-
-        <input
-            type="date"
-            id="availabilityDate"
-            value="<?php echo date('Y-m-d'); ?>"
-        >
-
-    </div>
-
-
-    <!-- PERIOD 1 -->
-
-    <div class="period">
-
-        <div class="period-info">
-
-            <div class="period-number">
-                Period 1
+            <div class="av-nav-label av-spaced">
+                FACULTY MANAGEMENT
             </div>
 
-            <div class="period-time">
-                08:30 AM - 09:15 AM
+            <a href="availability.php"
+               class="active"
+               aria-current="page">
+                <span class="av-nav-icon">◷</span>
+                Faculty Availability
+            </a>
+
+            <a href="requests.php">
+                <span class="av-nav-icon">⇄</span>
+                Handover Requests
+            </a>
+        </nav>
+
+        <div class="av-side-bottom">
+            <div class="av-side-note">
+                <strong> Your teaching hub</strong>
+                <p>
+                    Update availability and coordinate
+                    class coverage in a few clicks.
+                </p>
             </div>
 
+            <a class="av-logout" href="../auth/logout.php">
+                ↗ Logout
+            </a>
         </div>
+    </aside>
 
-
-        <div class="buttons">
-
-            <button
-                type="button"
-                class="attend-btn"
-                onclick="setAvailability(1, 'AVAILABLE')">
-
-                CAN ATTEND
-
-            </button>
-
-
-            <button
-                type="button"
-                class="cant-btn"
-                onclick="setAvailability(1, 'UNAVAILABLE')">
-
-                CAN'T GO
-
-            </button>
-
-
-            <button
-                type="button"
-                class="leave-btn"
-                onclick="setAvailability(1, 'LEAVE')">
-
-                LEAVE
-
-            </button>
-
-        </div>
-
-    </div>
-
-
-    <!-- PERIOD 2 -->
-
-    <div class="period">
-
-        <div class="period-info">
-
-            <div class="period-number">
-                Period 2
-            </div>
-
-            <div class="period-time">
-                09:15 AM - 10:00 AM
-            </div>
-
-        </div>
-
-
-        <div class="buttons">
-
-            <button
-                type="button"
-                class="attend-btn"
-                onclick="setAvailability(2, 'AVAILABLE')">
-
-                CAN ATTEND
-
-            </button>
-
-
-            <button
-                type="button"
-                class="cant-btn"
-                onclick="setAvailability(2, 'UNAVAILABLE')">
-
-                CAN'T GO
-
-            </button>
-
-
-            <button
-                type="button"
-                class="leave-btn"
-                onclick="setAvailability(2, 'LEAVE')">
-
-                LEAVE
-
-            </button>
-
-        </div>
-
-    </div>
-
-
-    <!-- PERIOD 3 -->
-
-    <div class="period">
-
-        <div class="period-info">
-
-            <div class="period-number">
-                Period 3
-            </div>
-
-            <div class="period-time">
-                10:00 AM - 10:45 AM
-            </div>
-
-        </div>
-
-
-        <div class="buttons">
-
-            <button
-                type="button"
-                class="attend-btn"
-                onclick="setAvailability(3, 'AVAILABLE')">
-
-                CAN ATTEND
-
-            </button>
-
-
-            <button
-                type="button"
-                class="cant-btn"
-                onclick="setAvailability(3, 'UNAVAILABLE')">
-
-                CAN'T GO
-
-            </button>
-
-
-            <button
-                type="button"
-                class="leave-btn"
-                onclick="setAvailability(3, 'LEAVE')">
-
-                LEAVE
-
-            </button>
-
-        </div>
-
-    </div>
-
-
-    <!-- PERIOD 4 -->
-
-    <div class="period">
-
-        <div class="period-info">
-
-            <div class="period-number">
-                Period 4
-            </div>
-
-            <div class="period-time">
-                11:00 AM - 11:45 AM
-            </div>
-
-        </div>
-
-
-        <div class="buttons">
-
-            <button
-                type="button"
-                class="attend-btn"
-                onclick="setAvailability(4, 'AVAILABLE')">
-
-                CAN ATTEND
-
-            </button>
-
-
-            <button
-                type="button"
-                class="cant-btn"
-                onclick="setAvailability(4, 'UNAVAILABLE')">
-
-                CAN'T GO
-
-            </button>
-
-
-            <button
-                type="button"
-                class="leave-btn"
-                onclick="setAvailability(4, 'LEAVE')">
-
-                LEAVE
-
-            </button>
-
-        </div>
-
-    </div>
-
-
-    <!-- PERIOD 5 -->
-
-    <div class="period">
-
-        <div class="period-info">
-
-            <div class="period-number">
-                Period 5
-            </div>
-
-            <div class="period-time">
-                11:45 AM - 12:30 PM
-            </div>
-
-        </div>
-
-
-        <div class="buttons">
-
-            <button
-                type="button"
-                class="attend-btn"
-                onclick="setAvailability(5, 'AVAILABLE')">
-
-                CAN ATTEND
-
-            </button>
-
-
-            <button
-                type="button"
-                class="cant-btn"
-                onclick="setAvailability(5, 'UNAVAILABLE')">
-
-                CAN'T GO
-
-            </button>
-
-
-            <button
-                type="button"
-                class="leave-btn"
-                onclick="setAvailability(5, 'LEAVE')">
-
-                LEAVE
-
-            </button>
-
-        </div>
-
-    </div>
-
-
-    <!-- PERIOD 6 -->
-
-    <div class="period">
-
-        <div class="period-info">
-
-            <div class="period-number">
-                Period 6
-            </div>
-
-            <div class="period-time">
-                12:30 PM - 01:15 PM
-            </div>
-
-        </div>
-
-
-        <div class="buttons">
-
-            <button
-                type="button"
-                class="attend-btn"
-                onclick="setAvailability(6, 'AVAILABLE')">
-
-                CAN ATTEND
-
-            </button>
-
-
-            <button
-                type="button"
-                class="cant-btn"
-                onclick="setAvailability(6, 'UNAVAILABLE')">
-
-                CAN'T GO
-
-            </button>
-
-
-            <button
-                type="button"
-                class="leave-btn"
-                onclick="setAvailability(6, 'LEAVE')">
-
-                LEAVE
-
-            </button>
-
-        </div>
-
-    </div>
-
-
-    <!-- PERIOD 7 -->
-
-    <div class="period">
-
-        <div class="period-info">
-
-            <div class="period-number">
-                Period 7
-            </div>
-
-            <div class="period-time">
-                02:00 PM - 02:45 PM
-            </div>
-
-        </div>
-
-
-        <div class="buttons">
-
-            <button
-                type="button"
-                class="attend-btn"
-                onclick="setAvailability(7, 'AVAILABLE')">
-
-                CAN ATTEND
-
-            </button>
-
-
-            <button
-                type="button"
-                class="cant-btn"
-                onclick="setAvailability(7, 'UNAVAILABLE')">
-
-                CAN'T GO
-
-            </button>
-
-
-            <button
-                type="button"
-                class="leave-btn"
-                onclick="setAvailability(7, 'LEAVE')">
-
-                LEAVE
-
-            </button>
-
-        </div>
-
-    </div>
-
-
-    <!-- PERIOD 8 -->
-
-    <div class="period">
-
-        <div class="period-info">
-
-            <div class="period-number">
-                Period 8
-            </div>
-
-            <div class="period-time">
-                02:45 PM - 03:30 PM
-            </div>
-
-        </div>
-
-
-        <div class="buttons">
-
-            <button
-                type="button"
-                class="attend-btn"
-                onclick="setAvailability(8, 'AVAILABLE')">
-
-                CAN ATTEND
-
-            </button>
-
-
-            <button
-                type="button"
-                class="cant-btn"
-                onclick="setAvailability(8, 'UNAVAILABLE')">
-
-                CAN'T GO
-
-            </button>
-
-
-            <button
-                type="button"
-                class="leave-btn"
-                onclick="setAvailability(8, 'LEAVE')">
-
-                LEAVE
-
-            </button>
-
-        </div>
-
-    </div>
-
-
-    <!-- PERIOD 9 -->
-
-    <div class="period">
-
-        <div class="period-info">
-
-            <div class="period-number">
-                Period 9
-            </div>
-
-            <div class="period-time">
-                03:45 PM - 04:30 PM
-            </div>
-
-        </div>
-
-
-        <div class="buttons">
-
-            <button
-                type="button"
-                class="attend-btn"
-                onclick="setAvailability(9, 'AVAILABLE')">
-
-                CAN ATTEND
-
-            </button>
-
-
-            <button
-                type="button"
-                class="cant-btn"
-                onclick="setAvailability(9, 'UNAVAILABLE')">
-
-                CAN'T GO
-
-            </button>
-
-
-            <button
-                type="button"
-                class="leave-btn"
-                onclick="setAvailability(9, 'LEAVE')">
-
-                LEAVE
-
-            </button>
-
-        </div>
-
-    </div>
-
-
-    <!-- CLASS FOUND -->
-
-    <div
-        id="classBox"
-        class="class-box">
-
-        <h3>
-            Class Found
-        </h3>
-
-        <div
-            id="classDetails"
-            class="class-details">
-        </div>
-
-        <button
+    <button class="av-overlay"
+            id="avOverlay"
             type="button"
-            class="handover-btn"
-            onclick="startHandover()">
+            hidden
+            aria-label="Close navigation"></button>
 
-            FIND AVAILABLE FACULTY
+    <!-- CONTENT -->
+    <div class="av-content">
 
-        </button>
+        <header class="av-topbar">
 
+            <div style="display:flex;align-items:center;gap:14px">
+                <button class="av-menu"
+                        id="avMenu"
+                        type="button"
+                        aria-label="Open navigation"
+                        aria-controls="avSidebar"
+                        aria-expanded="false">
+                    ☰
+                </button>
+
+                <div>
+                    <span class="av-topbar-label">
+                        FACULTY / MANAGEMENT
+                    </span>
+                    <h2>Faculty Availability</h2>
+                </div>
+            </div>
+
+            <div class="av-account">
+                <div class="av-avatar">
+                    <?= $initial ?>
+                </div>
+                <div class="av-account-text">
+                    <strong><?= $username ?></strong>
+                    <small>Faculty Member</small>
+                </div>
+            </div>
+        </header>
+
+        <main class="av-main">
+
+            <!-- HERO -->
+            <section class="av-hero">
+                <div>
+                    <span class="av-eyebrow">
+                         FACULTY WORKSPACE
+                    </span>
+                    <h1>Manage your availability</h1>
+                    <p>
+                        Keep your class availability up to date.
+                        If you can't attend a scheduled class,
+                        easily find colleagues who can take over.
+                    </p>
+                    <a class="av-back" href="dashboard.php">
+                        ← Back to Dashboard
+                    </a>
+                </div>
+
+                <div class="av-hero-art" aria-hidden="true">◷</div>
+            </section>
+
+            <!-- DATE SELECTOR -->
+            <section class="av-toolbar"
+                     aria-label="Choose availability date">
+
+                <div>
+                    <label class="av-date-label" for="availabilityDate">
+                        SELECT DATE
+                    </label>
+                    <input type="date"
+                           id="availabilityDate"
+                           value="<?= date('Y-m-d') ?>">
+                </div>
+
+                <div class="av-toolbar-hint">
+                    <strong>9 teaching periods</strong>
+                    Select a status for each period below.
+                </div>
+            </section>
+
+            <div id="avNotice"
+                 class="av-notice"
+                 role="status"
+                 aria-live="polite"
+                 hidden></div>
+
+            <!-- PERIODS -->
+            <section aria-labelledby="avPeriodsHeading">
+
+                <div class="av-heading">
+                    <div>
+                        <span class="av-eyebrow">DAILY SCHEDULE</span>
+                        <h2 id="avPeriodsHeading">
+                            Your teaching periods
+                        </h2>
+                        <p>
+                            Mark whether you can attend,
+                            can't go, or are on leave.
+                        </p>
+                    </div>
+                    <span class="av-count">09 PERIODS</span>
+                </div>
+
+                <div class="av-periods">
+
+                    <?php foreach ($periods as $number => $time): ?>
+
+                        <article class="av-period"
+                                 id="period-<?= $number ?>">
+
+                            <div class="av-period-left">
+                                <div class="av-period-icon"
+                                     aria-hidden="true">◷</div>
+
+                                <div>
+                                    <div class="av-period-number">
+                                        Period <?= $number ?>
+                                    </div>
+                                    <div class="av-period-time">
+                                        <?= htmlspecialchars($time, ENT_QUOTES, 'UTF-8') ?>
+                                    </div>
+                                    <span class="av-selected"
+                                          aria-live="polite"></span>
+                                </div>
+                            </div>
+
+                            <div class="av-actions">
+                                <button type="button"
+                                        class="av-attend"
+                                        onclick="setAvailability(<?= $number ?>, 'AVAILABLE')">
+                                    ✓ CAN ATTEND
+                                </button>
+
+                                <button type="button"
+                                        class="av-cant"
+                                        onclick="setAvailability(<?= $number ?>, 'UNAVAILABLE')">
+                                    ✕ CAN'T GO
+                                </button>
+
+                                <button type="button"
+                                        class="av-leave"
+                                        onclick="setAvailability(<?= $number ?>, 'LEAVE')">
+                                    LEAVE
+                                </button>
+                            </div>
+
+                        </article>
+
+                    <?php endforeach; ?>
+
+                </div>
+            </section>
+
+            <!-- CLASS FOUND -->
+            <section id="classBox"
+                     class="av-panel"
+                     aria-labelledby="classBoxHeading">
+
+                <h3 id="classBoxHeading">
+                    Class found for this period
+                </h3>
+
+                <div id="classDetails"
+                     class="av-details-grid"></div>
+
+                <button type="button"
+                        class="av-primary"
+                        onclick="startHandover()">
+                    Find available faculty →
+                </button>
+            </section>
+
+            <!-- AVAILABLE FACULTY -->
+            <section id="facultyBox"
+                     class="av-panel"
+                     aria-labelledby="facultyBoxHeading">
+
+                <h3 id="facultyBoxHeading">
+                    Available faculty — same department
+                </h3>
+
+                <p id="facultyCount"
+                   class="av-faculty-count"></p>
+
+                <div id="facultyList"
+                     class="av-faculty-list"></div>
+
+                <button id="sendRequestButton"
+                        type="button"
+                        class="av-send"
+                        style="display:none"
+                        onclick="sendHandoverRequest()">
+                    SEND HANDOVER REQUEST TO ALL
+                </button>
+            </section>
+
+            <footer class="av-footer">
+                <span>
+                    © <?= date('Y') ?> Smart Faculty Assistant Portal
+                </span>
+                <span>Faculty Availability Management</span>
+            </footer>
+
+        </main>
     </div>
-
-
-    <!-- AVAILABLE FACULTY -->
-
-    <div
-        id="facultyBox"
-        class="faculty-box">
-
-        <h3>
-            Available Faculty - Same Department
-        </h3>
-
-        <div
-            id="facultyCount"
-            class="faculty-count">
-        </div>
-
-        <div id="facultyList"></div>
-
-        <button
-            id="sendRequestButton"
-            type="button"
-            class="send-btn"
-            style="display:none;"
-            onclick="sendHandoverRequest()">
-
-            SEND HANDOVER REQUEST TO ALL
-
-        </button>
-
-    </div>
-
-
 </div>
 
-
 <script>
-
-
-/* =========================================================
-   GLOBAL VARIABLES
-   ========================================================= */
-
 let selectedTimetableId = null;
-
 let selectedPeriodId = null;
+let selectedDate = null;
 
+const $ = id => document.getElementById(id);
+const dateInput = $('availabilityDate');
 
-/* =========================================================
-   SAVE AVAILABILITY
-   ========================================================= */
+/* SHOW MESSAGES */
 
-async function setAvailability(
-    periodId,
-    status
-) {
+function notice(message, type = '') {
+    const el = $('avNotice');
+    el.textContent = message;
+    el.className = 'av-notice' + (type ? ' ' + type : '');
+    el.hidden = false;
+}
 
-    const date =
-        document.getElementById(
-            "availabilityDate"
-        ).value;
+/* CLEAR OLD HANDOVER SELECTION */
 
+function resetHandover() {
+    selectedTimetableId = null;
+    selectedPeriodId = null;
+    selectedDate = null;
+
+    $('classBox').style.display = 'none';
+    $('facultyBox').style.display = 'none';
+    $('facultyList').replaceChildren();
+    $('facultyCount').textContent = '';
+
+    const sendButton = $('sendRequestButton');
+    sendButton.style.display = 'none';
+    sendButton.disabled = false;
+    sendButton.textContent = 'SEND HANDOVER REQUEST TO ALL';
+}
+
+/* DATE CHANGE */
+
+dateInput.addEventListener('change', () => {
+    resetHandover();
+    $('avNotice').hidden = true;
+
+    document.querySelectorAll('.av-period').forEach(row => {
+        row.querySelectorAll('button').forEach(btn => {
+            btn.classList.remove('is-selected');
+        });
+
+        row.querySelector('.av-selected').textContent = '';
+    });
+});
+
+/* MOBILE NAVIGATION */
+
+(function() {
+    const menu = $('avMenu');
+    const sidebar = $('avSidebar');
+    const overlay = $('avOverlay');
+
+    const setOpen = open => {
+        sidebar.classList.toggle('open', open);
+        overlay.hidden = !open;
+        menu.setAttribute('aria-expanded', String(open));
+    };
+
+    menu.addEventListener('click', () => {
+        setOpen(!sidebar.classList.contains('open'));
+    });
+
+    overlay.addEventListener('click', () => setOpen(false));
+
+    document.addEventListener('keydown', event => {
+        if (event.key === 'Escape') setOpen(false);
+    });
+})();
+
+/* SHARED POST REQUEST HELPER */
+
+async function postJson(endpoint, values) {
+    const formData = new FormData();
+
+    Object.entries(values).forEach(([key, value]) => {
+        formData.append(key, value);
+    });
+
+    const response = await fetch(endpoint, {
+        method: 'POST',
+        body: formData
+    });
+
+    const text = await response.text();
+
+    try {
+        return JSON.parse(text);
+    } catch (e) {
+        console.error('Invalid API response:', text);
+        throw new Error(
+            'Invalid server response. Check PHP server logs.'
+        );
+    }
+}
+
+/* HIGHLIGHT SAVED STATUS */
+
+function showSelected(periodId, status) {
+    const row = $('period-' + periodId);
+
+    row.querySelectorAll('button').forEach(btn => {
+        btn.classList.remove('is-selected');
+    });
+
+    const cls = status === 'AVAILABLE'
+        ? 'av-attend'
+        : status === 'UNAVAILABLE'
+            ? 'av-cant'
+            : 'av-leave';
+
+    row.querySelector('.' + cls).classList.add('is-selected');
+
+    const labels = {
+        AVAILABLE: 'Can attend',
+        UNAVAILABLE: "Can't go",
+        LEAVE: 'Leave'
+    };
+
+    row.querySelector('.av-selected').textContent =
+        'Saved: ' + labels[status];
+}
+
+/* SAVE AVAILABILITY */
+
+async function setAvailability(periodId, status) {
+    const date = dateInput.value;
 
     if (!date) {
-
-        alert(
-            "Please select a date."
-        );
-
+        alert('Please select a date.');
         return;
     }
 
+    let reason = '';
 
-    let reason = "";
+    if (status === 'UNAVAILABLE') {
+        reason = prompt("Why can't you attend this period?");
 
-
-    if (
-        status === "UNAVAILABLE"
-    ) {
-
-        reason = prompt(
-            "Why can't you attend this period?"
-        );
-
-
-        if (
-            reason === null ||
-            reason.trim() === ""
-        ) {
-
-            alert(
-                "Please provide a reason."
-            );
-
+        if (reason === null || !reason.trim()) {
+            alert('Please provide a reason.');
             return;
         }
 
+        reason = reason.trim();
     }
 
+    const row = $('period-' + periodId);
+    const buttons = [...row.querySelectorAll('button')];
 
-    const formData =
-        new FormData();
-
-
-    formData.append(
-        "date",
-        date
-    );
-
-
-    formData.append(
-        "period_id",
-        periodId
-    );
-
-
-    formData.append(
-        "status",
-        status
-    );
-
-
-    formData.append(
-        "reason",
-        reason
-    );
-
+    buttons.forEach(btn => btn.disabled = true);
 
     try {
+        const data = await postJson('../api/availability.php', {
+            date,
+            period_id: periodId,
+            status,
+            reason
+        });
 
-        const response =
-            await fetch(
-                "../api/availability.php",
-                {
-                    method: "POST",
-                    body: formData
-                }
+        if (!data.success) {
+            notice(
+                data.message || 'Unable to save availability.',
+                'error'
             );
-
-
-        const text =
-            await response.text();
-
-
-        console.log(
-            "Availability API:",
-            text
-        );
-
-
-        let data;
-
-
-        try {
-
-            data =
-                JSON.parse(text);
-
-        } catch (error) {
-
-            alert(
-                "Invalid server response.\n\n" +
-                text
-            );
-
             return;
         }
 
+        notice(
+            data.message || 'Availability saved successfully.',
+            'success'
+        );
 
-        if (
-            data.success
-        ) {
+        resetHandover();
+        showSelected(periodId, status);
 
-            alert(
-                data.message
-            );
+        if (status === 'UNAVAILABLE') {
+            await checkClass(date, periodId);
+        }
 
+    } catch (e) {
+        notice('Unable to save: ' + e.message, 'error');
 
-            if (
-                status === "UNAVAILABLE"
-            ) {
+    } finally {
+        buttons.forEach(btn => btn.disabled = false);
+    }
+}
 
-                await checkClass(
-                    date,
-                    periodId
-                );
+/* CHECK CLASS FOR SELECTED PERIOD */
 
-            }
+async function checkClass(date, periodId) {
+    try {
+        const data = await postJson('../api/check_class.php', {
+            date,
+            period_id: periodId
+        });
 
-        } else {
-
-            alert(
+        if (!data.success || !data.class_found) {
+            resetHandover();
+            notice(
                 data.message ||
-                "Something went wrong."
+                'No class is scheduled for this faculty in this period.'
             );
-
-        }
-
-
-    } catch (error) {
-
-        console.error(
-            error
-        );
-
-
-        alert(
-            "Unable to connect to server.\n\n" +
-            error.message
-        );
-
-    }
-
-}
-
-
-/* =========================================================
-   CHECK CLASS
-   ========================================================= */
-
-async function checkClass(
-    date,
-    periodId
-) {
-
-    const formData =
-        new FormData();
-
-
-    formData.append(
-        "date",
-        date
-    );
-
-
-    formData.append(
-        "period_id",
-        periodId
-    );
-
-
-    try {
-
-        const response =
-            await fetch(
-                "../api/check_class.php",
-                {
-                    method: "POST",
-                    body: formData
-                }
-            );
-
-
-        const text =
-            await response.text();
-
-
-        console.log(
-            "Class Check API:",
-            text
-        );
-
-
-        let data;
-
-
-        try {
-
-            data =
-                JSON.parse(text);
-
-        } catch (error) {
-
-            alert(
-                "Invalid class response.\n\n" +
-                text
-            );
-
             return;
         }
 
+        const c = data.class;
 
-        if (
-            data.success &&
-            data.class_found
-        ) {
+        selectedTimetableId = c.timetable_id;
+        selectedPeriodId = periodId;
+        selectedDate = date;
 
-            const c =
-                data.class;
+        const fields = [
+            ['Date', date],
+            ['Day', data.day],
+            ['Timetable ID', c.timetable_id],
+            ['Period', c.period_id],
+            ['Section ID', c.section_id],
+            ['Subject ID', c.subject_id],
+            ['Classroom ID', c.classroom_id]
+        ];
 
+        const details = $('classDetails');
+        details.replaceChildren();
 
-            selectedTimetableId =
-                c.timetable_id;
+        fields.forEach(([label, value]) => {
+            const cell = document.createElement('div');
+            cell.className = 'av-detail';
 
+            const name = document.createElement('span');
+            name.textContent = label;
 
-            selectedPeriodId =
-                periodId;
+            const val = document.createElement('strong');
+            val.textContent = value ?? '';
 
+            cell.append(name, val);
+            details.appendChild(cell);
+        });
 
-            document.getElementById(
-                "classDetails"
-            ).innerHTML =
+        $('classBox').style.display = 'block';
+        $('facultyBox').style.display = 'none';
 
-                "<strong>Date:</strong> " +
-                escapeHtml(date) +
-                "<br>" +
+        $('classBox').scrollIntoView({
+            behavior: 'smooth',
+            block: 'nearest'
+        });
 
-                "<strong>Day:</strong> " +
-                escapeHtml(data.day) +
-                "<br>" +
-
-                "<strong>Timetable ID:</strong> " +
-                escapeHtml(c.timetable_id) +
-                "<br>" +
-
-                "<strong>Period:</strong> " +
-                escapeHtml(c.period_id) +
-                "<br>" +
-
-                "<strong>Section ID:</strong> " +
-                escapeHtml(c.section_id) +
-                "<br>" +
-
-                "<strong>Subject ID:</strong> " +
-                escapeHtml(c.subject_id) +
-                "<br>" +
-
-                "<strong>Classroom ID:</strong> " +
-                escapeHtml(c.classroom_id);
-
-
-            document.getElementById(
-                "classBox"
-            ).style.display =
-                "block";
-
-
-            document.getElementById(
-                "facultyBox"
-            ).style.display =
-                "none";
-
-
-            document.getElementById(
-                "facultyList"
-            ).innerHTML =
-                "";
-
-
-            document.getElementById(
-                "facultyCount"
-            ).innerHTML =
-                "";
-
-
-            document.getElementById(
-                "sendRequestButton"
-            ).style.display =
-                "none";
-
-
-            document.getElementById(
-                "sendRequestButton"
-            ).disabled =
-                false;
-
-
-            document.getElementById(
-                "sendRequestButton"
-            ).innerText =
-                "SEND HANDOVER REQUEST TO ALL";
-
-
-        } else {
-
-            selectedTimetableId =
-                null;
-
-
-            selectedPeriodId =
-                null;
-
-
-            document.getElementById(
-                "classBox"
-            ).style.display =
-                "none";
-
-
-            document.getElementById(
-                "facultyBox"
-            ).style.display =
-                "none";
-
-
-            alert(
-                "No class is scheduled for this faculty in this period."
-            );
-
-        }
-
-
-    } catch (error) {
-
-        console.error(
-            error
+    } catch (e) {
+        notice(
+            'Unable to check class: ' + e.message,
+            'error'
         );
-
-
-        alert(
-            "Unable to check class.\n\n" +
-            error.message
-        );
-
     }
-
 }
 
-
-/* =========================================================
-   FIND ALL AVAILABLE FACULTY
-   ========================================================= */
+/* FIND AVAILABLE FACULTY */
 
 async function startHandover() {
-
     if (
-        !selectedTimetableId
+        !selectedTimetableId ||
+        !selectedPeriodId ||
+        !selectedDate ||
+        dateInput.value !== selectedDate
     ) {
-
-        alert(
-            "No class selected."
-        );
-
+        alert('Please select an unavailable class first.');
         return;
     }
 
+    const box = $('facultyBox');
+    const list = $('facultyList');
+    const count = $('facultyCount');
+    const btn = $('sendRequestButton');
 
-    const date =
-        document.getElementById(
-            "availabilityDate"
-        ).value;
-
-
-    if (!date) {
-
-        alert(
-            "Please select a date."
-        );
-
-        return;
-    }
-
-
-    if (
-        !selectedPeriodId
-    ) {
-
-        alert(
-            "Period information is missing."
-        );
-
-        return;
-    }
-
-
-    const facultyBox =
-        document.getElementById(
-            "facultyBox"
-        );
-
-
-    const facultyListDiv =
-        document.getElementById(
-            "facultyList"
-        );
-
-
-    const facultyCount =
-        document.getElementById(
-            "facultyCount"
-        );
-
-
-    const sendButton =
-        document.getElementById(
-            "sendRequestButton"
-        );
-
-
-    facultyListDiv.innerHTML =
-        "<p>Checking available faculty...</p>";
-
-
-    facultyCount.innerHTML =
-        "";
-
-
-    sendButton.style.display =
-        "none";
-
-
-    sendButton.disabled =
-        false;
-
-
-    sendButton.innerText =
-        "SEND HANDOVER REQUEST TO ALL";
-
-
-    facultyBox.style.display =
-        "block";
-
-
-    const formData =
-        new FormData();
-
-
-    formData.append(
-        "date",
-        date
-    );
-
-
-    formData.append(
-        "period_id",
-        selectedPeriodId
-    );
-
+    box.style.display = 'block';
+    list.textContent = 'Checking available faculty...';
+    count.textContent = '';
+    btn.style.display = 'none';
+    btn.disabled = false;
+    btn.textContent = 'SEND HANDOVER REQUEST TO ALL';
 
     try {
-
-        const response =
-            await fetch(
-                "../api/find_alternate_faculty.php",
-                {
-                    method: "POST",
-                    body: formData
-                }
-            );
-
-
-        const text =
-            await response.text();
-
-
-        console.log(
-            "Alternate Faculty API:",
-            text
-        );
-
-
-        let data;
-
-
-        try {
-
-            data =
-                JSON.parse(text);
-
-        } catch (error) {
-
-            facultyListDiv.innerHTML =
-
-                "<div class='info-message'>" +
-
-                "Invalid server response." +
-
-                "</div>";
-
-            console.error(
-                text
-            );
-
-            return;
-        }
-
-
-        if (
-            !data.success
-        ) {
-
-            facultyListDiv.innerHTML =
-
-                "<div class='info-message'>" +
-
-                escapeHtml(
-                    data.message ||
-                    "Unable to find available faculty."
-                ) +
-
-                "</div>";
-
-            return;
-        }
-
-
-        const availableFaculty =
-            data.faculty || [];
-
-
-        facultyListDiv.innerHTML =
-            "";
-
-
-        /* =================================================
-           NO AVAILABLE FACULTY
-           ================================================= */
-
-        if (
-            availableFaculty.length === 0
-        ) {
-
-            facultyCount.innerHTML =
-                "0 available faculty members found.";
-
-
-            facultyListDiv.innerHTML =
-
-                "<div class='info-message'>" +
-
-                "No available faculty members were found " +
-
-                "in the same department for this period." +
-
-                "</div>";
-
-
-            sendButton.style.display =
-                "none";
-
-
-            return;
-        }
-
-
-        /* =================================================
-           SHOW COUNT
-           ================================================= */
-
-        facultyCount.innerHTML =
-
-            availableFaculty.length +
-
-            " available faculty member" +
-
-            (
-                availableFaculty.length > 1
-                    ? "s"
-                    : ""
-            ) +
-
-            " found in the same department.";
-
-
-        /* =================================================
-           DISPLAY ALL FACULTY
-           ================================================= */
-
-        availableFaculty.forEach(
-            function(faculty) {
-
-                const item =
-                    document.createElement(
-                        "div"
-                    );
-
-
-                item.className =
-                    "faculty-item";
-
-
-                item.innerHTML =
-
-                    "<strong>" +
-
-                    escapeHtml(
-                        faculty.faculty_name
-                    ) +
-
-                    "</strong>" +
-
-                    "<br><br>" +
-
-                    "<span>" +
-
-                    "<strong>Faculty Code:</strong> " +
-
-                    escapeHtml(
-                        faculty.faculty_code
-                    ) +
-
-                    "</span>" +
-
-                    "<br>" +
-
-                    "<span>" +
-
-                    "<strong>Email:</strong> " +
-
-                    escapeHtml(
-                        faculty.email
-                    ) +
-
-                    "</span>" +
-
-                    "<br>" +
-
-                    "<span>" +
-
-                    "<strong>Designation:</strong> " +
-
-                    escapeHtml(
-                        faculty.designation ||
-                        "N/A"
-                    ) +
-
-                    "</span>" +
-
-                    "<br>" +
-
-                    "<span>" +
-
-                    "<strong>Status:</strong> Available" +
-
-                    "</span>";
-
-
-                facultyListDiv.appendChild(
-                    item
-                );
-
+        const data = await postJson(
+            '../api/find_alternate_faculty.php',
+            {
+                date: selectedDate,
+                period_id: selectedPeriodId
             }
         );
 
-
-        /* =================================================
-           SHOW SEND BUTTON
-           ================================================= */
-
-        sendButton.style.display =
-            "inline-block";
-
-
-    } catch (error) {
-
-        console.error(
-            "Alternate Faculty Error:",
-            error
-        );
-
-
-        facultyListDiv.innerHTML =
-
-            "<div class='info-message'>" +
-
-            "Unable to connect to server.<br><br>" +
-
-            escapeHtml(
-                error.message
-            ) +
-
-            "</div>";
-
-
-    }
-
-}
-
-
-/* =========================================================
-   SEND HANDOVER REQUEST TO ALL
-   ========================================================= */
-
-async function sendHandoverRequest() {
-
-    if (
-        !selectedTimetableId
-    ) {
-
-        alert(
-            "No class selected."
-        );
-
-        return;
-    }
-
-
-    const date =
-        document.getElementById(
-            "availabilityDate"
-        ).value;
-
-
-    if (!date) {
-
-        alert(
-            "Please select a date."
-        );
-
-        return;
-    }
-
-
-    if (
-        !selectedPeriodId
-    ) {
-
-        alert(
-            "Period information is missing."
-        );
-
-        return;
-    }
-
-
-    const reason =
-        prompt(
-            "Enter the reason for handover:"
-        );
-
-
-    if (
-        reason === null ||
-        reason.trim() === ""
-    ) {
-
-        alert(
-            "Please provide a handover reason."
-        );
-
-        return;
-    }
-
-
-    const facultyCountText =
-        document.getElementById(
-            "facultyCount"
-        ).innerText;
-
-
-    const confirmSend =
-        confirm(
-
-            "Send the handover request to ALL available faculty members?\n\n" +
-
-            facultyCountText
-
-        );
-
-
-    if (!confirmSend) {
-
-        return;
-    }
-
-
-    const sendButton =
-        document.getElementById(
-            "sendRequestButton"
-        );
-
-
-    sendButton.disabled =
-        true;
-
-
-    sendButton.innerText =
-        "SENDING REQUESTS...";
-
-
-    const formData =
-        new FormData();
-
-
-    formData.append(
-        "date",
-        date
-    );
-
-
-    formData.append(
-        "timetable_id",
-        selectedTimetableId
-    );
-
-
-    formData.append(
-        "reason",
-        reason
-    );
-
-
-    try {
-
-        const response =
-            await fetch(
-                "../api/create_handover.php",
-                {
-                    method: "POST",
-                    body: formData
-                }
-            );
-
-
-        const text =
-            await response.text();
-
-
-        console.log(
-            "Create Handover API:",
-            text
-        );
-
-
-        let data;
-
-
-        try {
-
-            data =
-                JSON.parse(text);
-
-        } catch (error) {
-
-            sendButton.disabled =
-                false;
-
-
-            sendButton.innerText =
-                "SEND HANDOVER REQUEST TO ALL";
-
-
-            alert(
-                "Invalid handover response.\n\n" +
-                text
-            );
-
+        if (!data.success) {
+            list.textContent =
+                data.message || 'Unable to find faculty.';
             return;
         }
 
+        const facultyList = Array.isArray(data.faculty)
+            ? data.faculty
+            : [];
 
-        if (
-            data.success
-        ) {
+        count.textContent =
+            facultyList.length +
+            ' available faculty member' +
+            (facultyList.length === 1 ? '' : 's') +
+            ' found in the same department.';
 
-            const requestCount =
-                data.request_count || 0;
+        list.replaceChildren();
 
+        if (!facultyList.length) {
+            const msg = document.createElement('div');
+            msg.className = 'av-info';
 
-            alert(
+            msg.textContent =
+                'No available faculty members were found ' +
+                'in the same department for this period.';
 
-                "Handover request sent successfully!\n\n" +
-
-                "Requests sent to " +
-
-                requestCount +
-
-                " available faculty member" +
-
-                (
-                    requestCount !== 1
-                        ? "s."
-                        : "."
-                )
-
-            );
-
-
-            sendButton.disabled =
-                true;
-
-
-            sendButton.innerText =
-                "REQUESTS SENT";
-
-
-            sendButton.style.background =
-                "#777";
-
-
-        } else {
-
-            sendButton.disabled =
-                false;
-
-
-            sendButton.innerText =
-                "SEND HANDOVER REQUEST TO ALL";
-
-
-            alert(
-                data.message ||
-                "Unable to create handover request."
-            );
-
+            list.appendChild(msg);
+            return;
         }
 
+        facultyList.forEach(faculty => {
+            const card = document.createElement('div');
+            card.className = 'av-faculty-item';
 
-    } catch (error) {
+            const name = document.createElement('strong');
+            name.textContent = faculty.faculty_name || 'Faculty';
+            card.appendChild(name);
 
-        console.error(
-            "Handover Request Error:",
-            error
+            const fields = [
+                ['Faculty code', faculty.faculty_code],
+                ['Email', faculty.email],
+                ['Designation', faculty.designation || 'N/A']
+            ];
+
+            fields.forEach(([label, value]) => {
+                const row = document.createElement('p');
+
+                const strong = document.createElement('b');
+                strong.textContent = label + ': ';
+
+                row.append(
+                    strong,
+                    document.createTextNode(value ?? '')
+                );
+
+                card.appendChild(row);
+            });
+
+            const pill = document.createElement('span');
+            pill.className = 'av-pill';
+            pill.textContent = '● Available';
+            card.appendChild(pill);
+
+            list.appendChild(card);
+        });
+
+        btn.style.display = 'inline-flex';
+
+    } catch (e) {
+        list.textContent =
+            'Unable to find faculty: ' + e.message;
+    }
+}
+
+/* SEND HANDOVER REQUEST */
+
+async function sendHandoverRequest() {
+    if (
+        !selectedTimetableId ||
+        !selectedPeriodId ||
+        !selectedDate ||
+        selectedDate !== dateInput.value
+    ) {
+        alert('No valid class selected.');
+        return;
+    }
+
+    let reason = prompt('Enter the reason for handover:');
+
+    if (reason === null || !reason.trim()) {
+        alert('Please provide a handover reason.');
+        return;
+    }
+
+    reason = reason.trim();
+
+    const confirmed = confirm(
+        'Send the handover request to ALL available faculty members?\n\n' +
+        $('facultyCount').textContent
+    );
+
+    if (!confirmed) return;
+
+    const btn = $('sendRequestButton');
+    btn.disabled = true;
+    btn.textContent = 'SENDING REQUESTS...';
+
+    try {
+        const data = await postJson(
+            '../api/create_handover.php',
+            {
+                date: selectedDate,
+                timetable_id: selectedTimetableId,
+                reason
+            }
         );
 
+        if (!data.success) {
+            alert(
+                data.message || 'Unable to create handover request.'
+            );
 
-        sendButton.disabled =
-            false;
+            btn.disabled = false;
+            btn.textContent = 'SEND HANDOVER REQUEST TO ALL';
+            return;
+        }
 
-
-        sendButton.innerText =
-            "SEND HANDOVER REQUEST TO ALL";
-
+        const count = data.request_count || 0;
 
         alert(
-
-            "Unable to send handover request.\n\n" +
-
-            error.message
-
+            'Handover request sent successfully!\n\n' +
+            'Requests sent to ' + count +
+            ' available faculty member' +
+            (count === 1 ? '.' : 's.')
         );
 
-    }
-
-}
-
-
-/* =========================================================
-   HTML ESCAPE
-   ========================================================= */
-
-function escapeHtml(value) {
-
-    if (
-        value === null ||
-        value === undefined
-    ) {
-
-        return "";
-
-    }
-
-
-    return String(value)
-
-        .replace(
-            /&/g,
-            "&amp;"
-        )
-
-        .replace(
-            /</g,
-            "&lt;"
-        )
-
-        .replace(
-            />/g,
-            "&gt;"
-        )
-
-        .replace(
-            /"/g,
-            "&quot;"
-        )
-
-        .replace(
-            /'/g,
-            "&#039;"
+        notice(
+            'Handover request sent successfully.',
+            'success'
         );
 
-}
+        btn.disabled = true;
+        btn.textContent = 'REQUESTS SENT';
 
+    } catch (e) {
+        alert('Unable to send handover request: ' + e.message);
+
+        btn.disabled = false;
+        btn.textContent = 'SEND HANDOVER REQUEST TO ALL';
+    }
+}
 </script>
 
 </body>
-
 </html>

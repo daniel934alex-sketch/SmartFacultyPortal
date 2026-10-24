@@ -1,5 +1,5 @@
-<?php
 
+<?php
 session_start();
 
 if (!isset($_SESSION['user_id'])) {
@@ -16,25 +16,17 @@ require_once "../config/database.php";
 
 $user_id = (int) $_SESSION['user_id'];
 
-
-/* =========================================================
-   GET CURRENT FACULTY
-   ========================================================= */
+/* GET CURRENT FACULTY */
 
 $stmt = $conn->prepare("
-    SELECT
-        faculty_id,
-        faculty_name,
-        faculty_code
+    SELECT faculty_id, faculty_name, faculty_code
     FROM faculty
     WHERE user_id = ?
     LIMIT 1
 ");
 
 $stmt->bind_param("i", $user_id);
-
 $stmt->execute();
-
 $result = $stmt->get_result();
 
 if ($result->num_rows === 0) {
@@ -42,810 +34,1370 @@ if ($result->num_rows === 0) {
 }
 
 $faculty = $result->fetch_assoc();
-
-$faculty_id = (int) $faculty['faculty_id'];
-
+$faculty_id = (int)$faculty['faculty_id'];
 $stmt->close();
 
-
-/* =========================================================
-   GET HANDOVER REQUESTS
-   ========================================================= */
+/* GET HANDOVER REQUESTS - ORIGINAL QUERY */
 
 $sql = "
-
     SELECT
-
         hr.request_id,
-
         hr.handover_id,
-
         hr.status AS request_status,
-
         hr.requested_at,
-
         hr.responded_at,
-
         ch.reason,
-
         ch.status AS handover_status,
-
         t.timetable_id,
-
         t.day,
-
         t.period_id,
-
         t.section_id,
-
         t.subject_id,
-
         t.classroom_id,
-
         t.status AS timetable_status,
-
-        original_faculty.faculty_name
-            AS original_faculty_name,
-
-        original_faculty.faculty_code
-            AS original_faculty_code
-
+        original_faculty.faculty_name AS original_faculty_name,
+        original_faculty.faculty_code AS original_faculty_code
     FROM handover_requests hr
-
     INNER JOIN class_handover ch
         ON ch.handover_id = hr.handover_id
-
     INNER JOIN timetable t
         ON t.timetable_id = ch.timetable_id
-
     INNER JOIN faculty original_faculty
-        ON original_faculty.faculty_id =
-           ch.original_faculty_id
-
+        ON original_faculty.faculty_id = ch.original_faculty_id
     WHERE hr.alternate_faculty_id = ?
-
-    ORDER BY
-        hr.requested_at DESC
-
+    ORDER BY hr.requested_at DESC
 ";
 
-
 $stmt = $conn->prepare($sql);
-
-$stmt->bind_param(
-    "i",
-    $faculty_id
-);
-
+$stmt->bind_param("i", $faculty_id);
 $stmt->execute();
 
 $result = $stmt->get_result();
-
 $requests = [];
 
 while ($row = $result->fetch_assoc()) {
-
     $requests[] = $row;
 }
 
 $stmt->close();
-
 $conn->close();
 
+/* DISPLAY HELPERS */
+
+function reqEscape($value) {
+    return htmlspecialchars(
+        (string)($value ?? ''),
+        ENT_QUOTES,
+        'UTF-8'
+    );
+}
+
+$username = reqEscape($_SESSION['username'] ?? 'Faculty');
+$initial = strtoupper(substr($username, 0, 1));
+
+$total = count($requests);
+$pending = 0;
+$accepted = 0;
+$rejected = 0;
+
+foreach ($requests as $request) {
+    $status = strtoupper((string)$request['request_status']);
+
+    if ($status === 'PENDING') $pending++;
+    if ($status === 'ACCEPTED') $accepted++;
+    if ($status === 'REJECTED') $rejected++;
+}
 ?>
 
-
 <!DOCTYPE html>
-
 <html lang="en">
-
 <head>
-
-    <meta charset="UTF-8">
-
-    <meta
-        name="viewport"
-        content="width=device-width, initial-scale=1.0"
-    >
-
-    <title>Handover Requests</title>
-
-
-    <style>
-
-        * {
-            box-sizing: border-box;
-        }
-
-
-        body {
-            margin: 0;
-            padding: 0;
-            font-family: Arial, sans-serif;
-            background: #f4f6f9;
-        }
-
-
-        .container {
-            width: 85%;
-            max-width: 1000px;
-            margin: 40px auto;
-        }
-
-
-        .header {
-            background: white;
-            padding: 25px;
-            border-radius: 10px;
-            margin-bottom: 20px;
-            box-shadow:
-                0 3px 12px rgba(0,0,0,0.08);
-        }
-
-
-        .header h1 {
-            margin: 0 0 8px 0;
-            color: #222;
-        }
-
-
-        .header p {
-            margin: 5px 0;
-            color: #666;
-        }
-
-
-        .request-card {
-            background: white;
-            padding: 22px;
-            margin-bottom: 18px;
-            border-radius: 10px;
-            border: 1px solid #ddd;
-            box-shadow:
-                0 3px 10px rgba(0,0,0,0.05);
-        }
-
-
-        .request-card h3 {
-            margin-top: 0;
-            color: #222;
-        }
-
-
-        .details {
-            line-height: 1.8;
-            color: #444;
-        }
-
-
-        .reason {
-            margin-top: 12px;
-            padding: 12px;
-            background: #f8f9fa;
-            border-radius: 6px;
-            border-left: 4px solid #7b2cbf;
-        }
-
-
-        .status {
-            display: inline-block;
-            padding: 6px 12px;
-            border-radius: 20px;
-            font-size: 12px;
-            font-weight: bold;
-            margin-top: 10px;
-        }
-
-
-        .pending {
-            background: #fff3cd;
-            color: #856404;
-        }
-
-
-        .accepted {
-            background: #d4edda;
-            color: #155724;
-        }
-
-
-        .rejected {
-            background: #f8d7da;
-            color: #721c24;
-        }
-
-
-        .expired {
-            background: #e2e3e5;
-            color: #383d41;
-        }
-
-
-        .buttons {
-            display: flex;
-            gap: 10px;
-            margin-top: 18px;
-        }
-
-
-        .buttons button {
-            border: none;
-            padding: 11px 20px;
-            border-radius: 6px;
-            color: white;
-            font-weight: bold;
-            cursor: pointer;
-        }
-
-
-        .accept-btn {
-            background: #16803c;
-        }
-
-
-        .accept-btn:hover {
-            background: #116b31;
-        }
-
-
-        .reject-btn {
-            background: #a71930;
-        }
-
-
-        .reject-btn:hover {
-            background: #871426;
-        }
-
-
-        .no-requests {
-            background: white;
-            padding: 30px;
-            text-align: center;
-            border-radius: 10px;
-            color: #666;
-        }
-
-
-        .message {
-            display: none;
-            padding: 15px;
-            margin-bottom: 20px;
-            border-radius: 6px;
-            font-weight: bold;
-        }
-
-
-        .success-message {
-            background: #d4edda;
-            color: #155724;
-        }
-
-
-        .error-message {
-            background: #f8d7da;
-            color: #721c24;
-        }
-
-
-        @media (max-width: 700px) {
-
-            .container {
-                width: 95%;
-            }
-
-
-            .buttons {
-                flex-direction: column;
-            }
-
-
-            .buttons button {
-                width: 100%;
-            }
-
-        }
-
-    </style>
-
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Handover Requests | Smart Faculty</title>
+
+<style>
+/* ======================================
+   FACULTY HANDOVER - PREMIUM DARK THEME
+   Scoped to requests.php only
+   ====================================== */
+
+body.hr-page {
+    --hr-bg: #0c1220;
+    --hr-sidebar: #111a2b;
+    --hr-card: #172235;
+    --hr-border: #2a364b;
+    --hr-text: #f1f5ff;
+    --hr-muted: #96a4bc;
+    --hr-accent: #b5a3ff;
+
+    margin: 0;
+    min-height: 100vh;
+    background: var(--hr-bg);
+    color: var(--hr-text);
+    font-family: Inter, "Segoe UI", Arial, sans-serif;
+}
+
+.hr-page *,
+.hr-page *::before,
+.hr-page *::after {
+    box-sizing: border-box;
+}
+
+.hr-page a {
+    text-decoration: none;
+}
+
+.hr-page svg {
+    width: 21px;
+    height: 21px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+/* LAYOUT */
+
+.hr-page .hr-layout {
+    display: flex;
+    min-height: 100vh;
+}
+
+/* SIDEBAR */
+
+.hr-page .hr-sidebar {
+    position: sticky;
+    top: 0;
+    flex: 0 0 264px;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    padding: 28px 17px 22px;
+    background: var(--hr-sidebar);
+    border-right: 1px solid var(--hr-border);
+    overflow-y: auto;
+    z-index: 30;
+}
+
+.hr-page .hr-brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 0 7px 45px;
+    color: #fff;
+}
+
+.hr-page .hr-brand-logo {
+    display: grid;
+    place-items: center;
+    flex: 0 0 44px;
+    width: 44px;
+    height: 44px;
+    border-radius: 13px;
+    background: linear-gradient(135deg, #a58aff, #6550cc);
+}
+
+.hr-page .hr-brand-logo svg {
+    width: 27px;
+    height: 27px;
+}
+
+.hr-page .hr-brand strong {
+    display: block;
+    font-size: 15px;
+}
+
+.hr-page .hr-brand small {
+    display: block;
+    margin-top: 5px;
+    color: #9dabc2;
+    font-size: 9px;
+    letter-spacing: 1.5px;
+}
+
+.hr-page .hr-sidebar-label {
+    padding: 0 14px;
+    margin-bottom: 15px;
+    color: #687991;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 1.8px;
+}
+
+.hr-page .hr-nav {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.hr-page .hr-nav-section {
+    margin: 27px 0 15px;
+}
+
+.hr-page .hr-nav-link {
+    display: flex;
+    align-items: center;
+    gap: 13px;
+    padding: 13px 14px;
+    border: 1px solid transparent;
+    border-radius: 11px;
+    color: #98a6bc;
+    font-size: 13px;
+    font-weight: 550;
+    transition: .2s ease;
+}
+
+.hr-page .hr-nav-link:hover {
+    color: #fff;
+    background: #202c41;
+}
+
+.hr-page .hr-nav-link.active {
+    color: #e2d9ff;
+    background: #302b53;
+    border-color: #50467c;
+    font-weight: 700;
+}
+
+.hr-page .hr-nav-link svg {
+    width: 20px;
+    height: 20px;
+    flex-shrink: 0;
+}
+
+.hr-page .hr-sidebar-bottom {
+    margin-top: auto;
+    padding-top: 35px;
+}
+
+.hr-page .hr-side-help {
+    padding: 18px;
+    border: 1px solid #3b375f;
+    border-radius: 14px;
+    background: linear-gradient(145deg, #2b294e, #1a2440);
+}
+
+.hr-page .hr-side-help strong {
+    display: block;
+    color: #fff;
+    font-size: 13px;
+}
+
+.hr-page .hr-side-help p {
+    margin: 9px 0 0;
+    color: #a7b0ca;
+    font-size: 11px;
+    line-height: 1.7;
+}
+
+.hr-page .hr-side-logout {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 20px;
+    padding: 13px 14px;
+    border-radius: 10px;
+    color: #f1a4b1;
+    font-size: 13px;
+}
+
+.hr-page .hr-side-logout:hover {
+    background: #422536;
+}
+
+/* TOP HEADER */
+
+.hr-page .hr-content {
+    flex: 1;
+    min-width: 0;
+}
+
+.hr-page .hr-topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+    min-height: 91px;
+    padding: 17px 35px;
+    background: #111a2b;
+    border-bottom: 1px solid var(--hr-border);
+}
+
+.hr-page .hr-topbar-left {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+}
+
+.hr-page .hr-page-label {
+    color: #9983ff;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 1.5px;
+}
+
+.hr-page .hr-topbar h2 {
+    margin: 5px 0 0;
+    color: #f4f5ff;
+    font-size: 20px;
+}
+
+.hr-page .hr-user {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.hr-page .hr-avatar {
+    display: grid;
+    place-items: center;
+    width: 42px;
+    height: 42px;
+    border-radius: 13px;
+    background: #393060;
+    color: #e8deff;
+    font-weight: 800;
+}
+
+.hr-page .hr-user-info strong {
+    display: block;
+    font-size: 13px;
+}
+
+.hr-page .hr-user-info span {
+    display: block;
+    margin-top: 5px;
+    color: var(--hr-muted);
+    font-size: 11px;
+}
+
+.hr-page .hr-menu-button {
+    display: none;
+    padding: 9px 12px;
+    border: 1px solid var(--hr-border);
+    border-radius: 9px;
+    background: #263248;
+    color: white;
+    cursor: pointer;
+}
+
+/* MAIN AREA */
+
+.hr-page .hr-main {
+    width: min(1230px, 100%);
+    margin: 0 auto;
+    padding: 34px;
+}
+
+/* HERO */
+
+.hr-page .hr-hero {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 24px;
+    min-height: 225px;
+    padding: 36px 42px;
+    border: 1px solid #51478c;
+    border-radius: 21px;
+    background: linear-gradient(115deg, #28244e, #39316e 55%, #5c4da0);
+    overflow: hidden;
+}
+
+.hr-page .hr-eyebrow {
+    color: #bfb0ff;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 1.7px;
+}
+
+.hr-page .hr-hero h1 {
+    margin: 14px 0 12px;
+    color: #fff;
+    font-size: clamp(26px, 3vw, 36px);
+}
+
+.hr-page .hr-hero p {
+    margin: 0;
+    max-width: 560px;
+    color: #d2cfea;
+    font-size: 13px;
+    line-height: 1.8;
+}
+
+.hr-page .hr-back {
+    display: inline-flex;
+    margin-top: 23px;
+    padding: 12px 18px;
+    border-radius: 10px;
+    color: #191331;
+    background: #b0a0ff;
+    font-size: 12px;
+    font-weight: 750;
+}
+
+.hr-page .hr-back:hover {
+    background: #cec3ff;
+}
+
+.hr-page .hr-hero-art {
+    display: grid;
+    place-items: center;
+    flex: 0 0 130px;
+    width: 130px;
+    height: 130px;
+    border: 1px solid #ffffff35;
+    border-radius: 30px;
+    background: #ffffff19;
+    transform: rotate(-8deg);
+}
+
+.hr-page .hr-hero-art svg {
+    width: 65px;
+    height: 65px;
+    color: #fff;
+}
+
+/* SUMMARY */
+
+.hr-page .hr-summary {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 16px;
+    margin-top: 25px;
+}
+
+.hr-page .hr-stat {
+    padding: 22px;
+    border: 1px solid var(--hr-border);
+    border-radius: 16px;
+    background: var(--hr-card);
+}
+
+.hr-page .hr-stat-label {
+    display: block;
+    color: #ac9af9;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 1px;
+}
+
+.hr-page .hr-stat strong {
+    display: block;
+    margin: 12px 0 7px;
+    color: #fff;
+    font-size: 30px;
+}
+
+.hr-page .hr-stat small {
+    color: var(--hr-muted);
+    font-size: 11px;
+}
+
+/* SECTION */
+
+.hr-page .hr-section {
+    margin-top: 38px;
+}
+
+.hr-page .hr-section-head {
+    display: flex;
+    align-items: end;
+    justify-content: space-between;
+    gap: 15px;
+    margin-bottom: 22px;
+}
+
+.hr-page .hr-section-head h2 {
+    margin: 8px 0;
+    color: #fff;
+    font-size: 22px;
+}
+
+.hr-page .hr-section-head p {
+    margin: 0;
+    color: var(--hr-muted);
+    font-size: 13px;
+}
+
+.hr-page .hr-count-badge {
+    padding: 9px 12px;
+    border: 1px solid #36465d;
+    border-radius: 9px;
+    background: var(--hr-card);
+    color: #c4cbe0;
+    font-size: 11px;
+}
+
+/* REQUEST CARDS */
+
+.hr-page .hr-request-list {
+    display: grid;
+    gap: 18px;
+}
+
+.hr-page .hr-request-card {
+    padding: 25px;
+    border: 1px solid var(--hr-border);
+    border-radius: 17px;
+    background: var(--hr-card);
+}
+
+.hr-page .hr-request-card:hover {
+    border-color: #62588d;
+}
+
+.hr-page .hr-request-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 14px;
+    margin-bottom: 22px;
+}
+
+.hr-page .hr-request-number {
+    display: block;
+    margin-bottom: 8px;
+    color: #ac9af9;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 1px;
+}
+
+.hr-page .hr-request-header h3 {
+    margin: 0;
+    color: #fff;
+    font-size: 18px;
+}
+
+.hr-page .hr-status {
+    display: inline-flex;
+    padding: 8px 12px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: .5px;
+}
+
+.hr-page .hr-status.pending {
+    background: #493c29;
+    color: #ffd38b;
+}
+
+.hr-page .hr-status.accepted {
+    background: #1e453b;
+    color: #79e4b2;
+}
+
+.hr-page .hr-status.rejected {
+    background: #482c39;
+    color: #ffa4b5;
+}
+
+.hr-page .hr-status.expired {
+    background: #344052;
+    color: #c4cbd7;
+}
+
+.hr-page .hr-status.other {
+    background: #35365b;
+    color: #d4ccff;
+}
+
+/* REQUEST DETAILS */
+
+.hr-page .hr-detail-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.hr-page .hr-detail-item {
+    min-width: 0;
+    padding: 15px;
+    border: 1px solid #2c3950;
+    border-radius: 10px;
+    background: #1c293d;
+}
+
+.hr-page .hr-detail-item span {
+    display: block;
+    margin-bottom: 9px;
+    color: #91a0b8;
+    font-size: 11px;
+}
+
+.hr-page .hr-detail-item strong {
+    display: block;
+    color: #edf0ff;
+    font-size: 13px;
+    overflow-wrap: anywhere;
+}
+
+/* REASON */
+
+.hr-page .hr-reason {
+    margin-top: 20px;
+    padding: 18px;
+    border: 1px solid #443d69;
+    border-left: 4px solid #9a83ff;
+    border-radius: 11px;
+    background: #242640;
+}
+
+.hr-page .hr-reason strong {
+    display: block;
+    margin-bottom: 9px;
+    color: #d0c4ff;
+    font-size: 12px;
+}
+
+.hr-page .hr-reason p {
+    margin: 0;
+    color: #c7cde0;
+    font-size: 13px;
+    line-height: 1.8;
+    overflow-wrap: anywhere;
+}
+
+/* ACTION BUTTONS */
+
+.hr-page .hr-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-top: 22px;
+}
+
+.hr-page .hr-buttons button {
+    padding: 12px 20px;
+    border: none;
+    border-radius: 9px;
+    font-size: 12px;
+    font-weight: 800;
+    cursor: pointer;
+    transition: .2s ease;
+}
+
+.hr-page .hr-accept-btn {
+    background: #2eac79;
+    color: #092b1f;
+}
+
+.hr-page .hr-accept-btn:hover {
+    background: #63d6a4;
+}
+
+.hr-page .hr-reject-btn {
+    background: #593344;
+    color: #ffb6c1;
+    border: 1px solid #84506b !important;
+}
+
+.hr-page .hr-reject-btn:hover {
+    background: #754052;
+}
+
+.hr-page .hr-buttons button:disabled {
+    opacity: .5;
+    cursor: not-allowed;
+}
+
+/* MESSAGES */
+
+.hr-page .hr-message {
+    display: none;
+    margin-top: 24px;
+    padding: 16px 19px;
+    border-radius: 11px;
+    font-size: 13px;
+    font-weight: 650;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.hr-page .hr-success {
+    border: 1px solid #2d775d;
+    background: #1a3b32;
+    color: #84e5bc;
+}
+
+.hr-page .hr-error {
+    border: 1px solid #854455;
+    background: #402936;
+    color: #ffb1c0;
+}
+
+/* EMPTY STATE */
+
+.hr-page .hr-empty {
+    padding: 55px 25px;
+    border: 1px solid var(--hr-border);
+    border-radius: 17px;
+    background: var(--hr-card);
+    text-align: center;
+}
+
+.hr-page .hr-empty-icon {
+    display: grid;
+    place-items: center;
+    width: 70px;
+    height: 70px;
+    margin: 0 auto 18px;
+    border-radius: 20px;
+    color: #b7a4ff;
+    background: #373052;
+}
+
+.hr-page .hr-empty-icon svg {
+    width: 35px;
+    height: 35px;
+}
+
+.hr-page .hr-empty h3 {
+    margin: 0 0 10px;
+    color: #fff;
+}
+
+.hr-page .hr-empty p {
+    margin: 0;
+    color: var(--hr-muted);
+    font-size: 13px;
+}
+
+/* FOOTER */
+
+.hr-page .hr-footer {
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-top: 40px;
+    padding: 22px 0;
+    border-top: 1px solid var(--hr-border);
+    color: #77879e;
+    font-size: 11px;
+}
+
+.hr-page a:focus-visible,
+.hr-page button:focus-visible {
+    outline: 3px solid #b6a5ff;
+    outline-offset: 3px;
+}
+
+/* RESPONSIVE */
+
+@media (max-width: 1100px) {
+    .hr-page .hr-sidebar {
+        flex-basis: 235px;
+    }
+
+    .hr-page .hr-main {
+        padding: 28px;
+    }
+
+    .hr-page .hr-detail-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .hr-page .hr-summary {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 760px) {
+    .hr-page .hr-sidebar {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 270px;
+        height: 100dvh;
+        transform: translateX(-100%);
+        transition: transform .25s ease;
+        box-shadow: 10px 0 40px #00000040;
+    }
+
+    .hr-page .hr-sidebar.open {
+        transform: translateX(0);
+    }
+
+    .hr-page .hr-menu-button {
+        display: inline-block;
+    }
+
+    .hr-page .hr-topbar {
+        min-height: 76px;
+        padding: 15px 20px;
+    }
+
+    .hr-page .hr-topbar h2 {
+        font-size: 17px;
+    }
+
+    .hr-page .hr-user-info {
+        display: none;
+    }
+
+    .hr-page .hr-main {
+        padding: 20px 16px;
+    }
+
+    .hr-page .hr-hero {
+        min-height: 0;
+        padding: 29px 24px;
+    }
+
+    .hr-page .hr-hero-art {
+        display: none;
+    }
+
+    .hr-page .hr-summary {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .hr-page .hr-section-head {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .hr-page .hr-detail-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .hr-page .hr-request-card {
+        padding: 18px;
+    }
+
+    .hr-page .hr-buttons {
+        flex-direction: column;
+    }
+
+    .hr-page .hr-buttons button {
+        width: 100%;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .hr-page *,
+    .hr-page *::before,
+    .hr-page *::after {
+        transition-duration: .01ms !important;
+    }
+}
+</style>
 </head>
 
-
-<body>
-
-
-<div class="container">
-
-
-    <!-- HEADER -->
-
-    <div class="header">
-
-        <h1>
-            Handover Requests
-        </h1>
-
-        <p>
-            Faculty:
-            <strong>
-                <?php
-                echo htmlspecialchars(
-                    $faculty['faculty_name']
-                );
-                ?>
-            </strong>
-        </p>
-
-        <p>
-            Faculty Code:
-            <strong>
-                <?php
-                echo htmlspecialchars(
-                    $faculty['faculty_code']
-                );
-                ?>
-            </strong>
-        </p>
-
-    </div>
-
-
-    <!-- MESSAGE -->
-
-    <div
-        id="successMessage"
-        class="message success-message">
-    </div>
-
-
-    <div
-        id="errorMessage"
-        class="message error-message">
-    </div>
-
-
-    <?php if (count($requests) === 0): ?>
-
-
-        <div class="no-requests">
-
-            <h3>
-                No Handover Requests
-            </h3>
-
-            <p>
-                You currently have no handover requests.
-            </p>
-
-        </div>
-
-
-    <?php else: ?>
-
-
-        <?php foreach ($requests as $request): ?>
-
-
-            <div
-                class="request-card"
-                id="request-<?php
-                    echo (int)$request['request_id'];
-                ?>"
-            >
-
-
-                <h3>
-                    Handover Request #
-                    <?php
-                    echo (int)$request['request_id'];
-                    ?>
-                </h3>
-
-
-                <div class="details">
-
-
-                    <strong>
-                        From Faculty:
-                    </strong>
-
-                    <?php
-                    echo htmlspecialchars(
-                        $request['original_faculty_name']
-                    );
-                    ?>
-
-                    <br>
-
-
-                    <strong>
-                        Faculty Code:
-                    </strong>
-
-                    <?php
-                    echo htmlspecialchars(
-                        $request['original_faculty_code']
-                    );
-                    ?>
-
-                    <br>
-
-
-                    <strong>
-                        Day:
-                    </strong>
-
-                    <?php
-                    echo htmlspecialchars(
-                        $request['day']
-                    );
-                    ?>
-
-                    <br>
-
-
-                    <strong>
-                        Period:
-                    </strong>
-
-                    <?php
-                    echo (int)$request['period_id'];
-                    ?>
-
-                    <br>
-
-
-                    <strong>
-                        Section ID:
-                    </strong>
-
-                    <?php
-                    echo (int)$request['section_id'];
-                    ?>
-
-                    <br>
-
-
-                    <strong>
-                        Subject ID:
-                    </strong>
-
-                    <?php
-                    echo (int)$request['subject_id'];
-                    ?>
-
-                    <br>
-
-
-                    <strong>
-                        Classroom ID:
-                    </strong>
-
-                    <?php
-                    echo (int)$request['classroom_id'];
-                    ?>
-
-                    <br>
-
-
-                    <strong>
-                        Requested At:
-                    </strong>
-
-                    <?php
-                    echo htmlspecialchars(
-                        $request['requested_at']
-                    );
-                    ?>
-
-
-                </div>
-
-
-                <div class="reason">
-
-                    <strong>
-                        Reason:
-                    </strong>
-
-                    <br>
-
-                    <?php
-                    echo nl2br(
-                        htmlspecialchars(
-                            $request['reason']
-                        )
-                    );
-                    ?>
-
-                </div>
-
-
-                <?php
-
-                $status =
-                    $request['request_status'];
-
-                $statusClass =
-                    strtolower($status);
-
-                ?>
-
-
-                <div
-                    class="status <?php
-                        echo $statusClass;
-                    ?>"
-                >
-
-                    <?php
-                    echo htmlspecialchars(
-                        $status
-                    );
-                    ?>
-
-                </div>
-
-
-                <?php if ($status === 'PENDING'): ?>
-
-
-                    <div class="buttons">
-
-
-                        <button
-                            type="button"
-                            class="accept-btn"
-                            onclick="respondRequest(
-                                <?php
-                                echo (int)$request['request_id'];
-                                ?>,
-                                'ACCEPTED'
-                            )"
-                        >
-
-                            ACCEPT
-
-                        </button>
-
-
-                        <button
-                            type="button"
-                            class="reject-btn"
-                            onclick="respondRequest(
-                                <?php
-                                echo (int)$request['request_id'];
-                                ?>,
-                                'REJECTED'
-                            )"
-                        >
-
-                            REJECT
-
-                        </button>
-
-
-                    </div>
-
-
-                <?php endif; ?>
-
-
+<body class="hr-page">
+
+<div class="hr-layout">
+
+    <!-- SIDEBAR -->
+    <aside class="hr-sidebar" id="hr-sidebar">
+
+        <a href="dashboard.php" class="hr-brand">
+            <span class="hr-brand-logo">
+                <svg viewBox="0 0 24 24">
+                    <path d="m2 10 10-5 10 5-10 5-10-5Z"/>
+                    <path d="M6 12v5c4 3 8 3 12 0v-5"/>
+                    <path d="M22 10v7"/>
+                </svg>
+            </span>
+            <span>
+                <strong>Smart Faculty</strong>
+                <small>ASSISTANT PORTAL</small>
+            </span>
+        </a>
+
+        <div class="hr-sidebar-label">MAIN MENU</div>
+
+        <nav class="hr-nav" aria-label="Faculty navigation">
+
+            <a href="dashboard.php" class="hr-nav-link">
+                <svg viewBox="0 0 24 24">
+                    <rect x="3" y="3" width="7" height="7" rx="1"/>
+                    <rect x="14" y="3" width="7" height="7" rx="1"/>
+                    <rect x="3" y="14" width="7" height="7" rx="1"/>
+                    <rect x="14" y="14" width="7" height="7" rx="1"/>
+                </svg>
+                Dashboard
+            </a>
+
+            <a href="timetable.php" class="hr-nav-link">
+                <svg viewBox="0 0 24 24">
+                    <rect x="3" y="5" width="18" height="16" rx="2"/>
+                    <path d="M7 3v4M17 3v4M3 10h18"/>
+                    <path d="M8 14h3M14 14h3"/>
+                </svg>
+                My Timetable
+            </a>
+
+            <a href="notifications.php" class="hr-nav-link">
+                <svg viewBox="0 0 24 24">
+                    <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/>
+                    <path d="M10 21h4"/>
+                </svg>
+                Notifications
+            </a>
+
+            <a href="profile.php" class="hr-nav-link">
+                <svg viewBox="0 0 24 24">
+                    <circle cx="12" cy="8" r="4"/>
+                    <path d="M4 21a8 8 0 0 1 16 0"/>
+                </svg>
+                My Profile
+            </a>
+
+            <div class="hr-sidebar-label hr-nav-section">
+                FACULTY MANAGEMENT
             </div>
 
+            <a href="availability.php" class="hr-nav-link">
+                <svg viewBox="0 0 24 24">
+                    <circle cx="12" cy="12" r="9"/>
+                    <path d="M12 7v5l3 2"/>
+                </svg>
+                Faculty Availability
+            </a>
 
-        <?php endforeach; ?>
+            <a href="requests.php"
+               class="hr-nav-link active"
+               aria-current="page">
+                <svg viewBox="0 0 24 24">
+                    <path d="M4 7h16l-4-4M20 7l-4 4"/>
+                    <path d="M20 17H4l4-4M4 17l4 4"/>
+                </svg>
+                Handover Requests
+            </a>
+        </nav>
 
+        <div class="hr-sidebar-bottom">
+            <div class="hr-side-help">
+                <strong>✦ Your teaching hub</strong>
+                <p>Coordinate class handovers with your faculty team.</p>
+            </div>
 
-    <?php endif; ?>
+            <a href="../auth/logout.php" class="hr-side-logout">
+                <svg viewBox="0 0 24 24">
+                    <path d="M10 17l5-5-5-5M15 12H3"/>
+                    <path d="M12 3h6a3 3 0 0 1 3 3v12a3 3 0 0 1-3 3h-6"/>
+                </svg>
+                Logout
+            </a>
+        </div>
+    </aside>
 
+    <!-- MAIN CONTENT -->
+    <div class="hr-content">
 
+        <header class="hr-topbar">
+            <div class="hr-topbar-left">
+                <button type="button"
+                        id="hr-menu-button"
+                        class="hr-menu-button"
+                        aria-label="Toggle navigation"
+                        aria-controls="hr-sidebar"
+                        aria-expanded="false">
+                    ☰
+                </button>
+
+                <div>
+                    <span class="hr-page-label">FACULTY / MANAGEMENT</span>
+                    <h2>Handover Requests</h2>
+                </div>
+            </div>
+
+            <div class="hr-user">
+                <div class="hr-avatar"><?= reqEscape($initial) ?></div>
+                <div class="hr-user-info">
+                    <strong><?= $username ?></strong>
+                    <span>Faculty Member</span>
+                </div>
+            </div>
+        </header>
+
+        <main class="hr-main">
+
+            <!-- HERO -->
+            <section class="hr-hero">
+                <div>
+                    <span class="hr-eyebrow">
+                        ✦ FACULTY MANAGEMENT
+                    </span>
+
+                    <h1>Handover Requests</h1>
+
+                    <p>
+                        Review incoming class handover requests,
+                        check schedule details, and respond
+                        to your fellow faculty members.
+                    </p>
+
+                    <a href="dashboard.php" class="hr-back">
+                        ← Back to Dashboard
+                    </a>
+                </div>
+
+                <div class="hr-hero-art" aria-hidden="true">
+                    <svg viewBox="0 0 24 24">
+                        <path d="M4 7h16l-4-4M20 7l-4 4"/>
+                        <path d="M20 17H4l4-4M4 17l4 4"/>
+                    </svg>
+                </div>
+            </section>
+
+            <!-- SUMMARY CARDS -->
+            <section class="hr-summary" aria-label="Request summary">
+
+                <div class="hr-stat">
+                    <span class="hr-stat-label">TOTAL REQUESTS</span>
+                    <strong><?= $total ?></strong>
+                    <small>All received requests</small>
+                </div>
+
+                <div class="hr-stat">
+                    <span class="hr-stat-label">PENDING</span>
+                    <strong><?= $pending ?></strong>
+                    <small>Awaiting your response</small>
+                </div>
+
+                <div class="hr-stat">
+                    <span class="hr-stat-label">ACCEPTED</span>
+                    <strong><?= $accepted ?></strong>
+                    <small>Accepted requests</small>
+                </div>
+
+                <div class="hr-stat">
+                    <span class="hr-stat-label">REJECTED</span>
+                    <strong><?= $rejected ?></strong>
+                    <small>Rejected requests</small>
+                </div>
+
+            </section>
+
+            <!-- RESPONSE MESSAGES -->
+            <div id="successMessage"
+                 class="hr-message hr-success"
+                 role="status"></div>
+
+            <div id="errorMessage"
+                 class="hr-message hr-error"
+                 role="alert"></div>
+
+            <!-- REQUEST LIST -->
+            <section class="hr-section">
+
+                <div class="hr-section-head">
+                    <div>
+                        <span class="hr-eyebrow">REQUEST CENTER</span>
+                        <h2>Incoming Handover Requests</h2>
+                        <p>
+                            Review class details before accepting
+                            or rejecting a handover.
+                        </p>
+                    </div>
+
+                    <span class="hr-count-badge">
+                        <?= $total ?> Requests
+                    </span>
+                </div>
+
+                <div class="hr-request-list">
+
+                    <?php if ($total === 0): ?>
+
+                        <div class="hr-empty">
+                            <div class="hr-empty-icon">
+                                <svg viewBox="0 0 24 24">
+                                    <path d="M4 7h16l-4-4M20 7l-4 4"/>
+                                    <path d="M20 17H4l4-4M4 17l4 4"/>
+                                </svg>
+                            </div>
+
+                            <h3>No Handover Requests</h3>
+
+                            <p>
+                                You currently have no handover requests.
+                            </p>
+                        </div>
+
+                    <?php else: ?>
+
+                        <?php foreach ($requests as $request): ?>
+
+                            <?php
+                            $status = (string)$request['request_status'];
+
+                            $statusLower = strtolower($status);
+                            $allowedStatuses = [
+                                'pending',
+                                'accepted',
+                                'rejected',
+                                'expired'
+                            ];
+
+                            $statusClass = in_array(
+                                $statusLower,
+                                $allowedStatuses,
+                                true
+                            ) ? $statusLower : 'other';
+                            ?>
+
+                            <article class="hr-request-card"
+                                id="request-<?= (int)$request['request_id'] ?>">
+
+                                <div class="hr-request-header">
+                                    <div>
+                                        <span class="hr-request-number">
+                                            HANDOVER REQUEST
+                                        </span>
+
+                                        <h3>
+                                            Request #<?= (int)$request['request_id'] ?>
+                                        </h3>
+                                    </div>
+
+                                    <span class="hr-status <?= $statusClass ?>">
+                                        <?= reqEscape($status) ?>
+                                    </span>
+                                </div>
+
+                                <div class="hr-detail-grid">
+
+                                    <div class="hr-detail-item">
+                                        <span>From Faculty</span>
+                                        <strong>
+                                            <?= reqEscape($request['original_faculty_name']) ?>
+                                        </strong>
+                                    </div>
+
+                                    <div class="hr-detail-item">
+                                        <span>Faculty Code</span>
+                                        <strong>
+                                            <?= reqEscape($request['original_faculty_code']) ?>
+                                        </strong>
+                                    </div>
+
+                                    <div class="hr-detail-item">
+                                        <span>Day</span>
+                                        <strong>
+                                            <?= reqEscape($request['day']) ?>
+                                        </strong>
+                                    </div>
+
+                                    <div class="hr-detail-item">
+                                        <span>Period</span>
+                                        <strong>
+                                            P<?= (int)$request['period_id'] ?>
+                                        </strong>
+                                    </div>
+
+                                    <div class="hr-detail-item">
+                                        <span>Section ID</span>
+                                        <strong>
+                                            <?= (int)$request['section_id'] ?>
+                                        </strong>
+                                    </div>
+
+                                    <div class="hr-detail-item">
+                                        <span>Subject ID</span>
+                                        <strong>
+                                            <?= (int)$request['subject_id'] ?>
+                                        </strong>
+                                    </div>
+
+                                    <div class="hr-detail-item">
+                                        <span>Classroom ID</span>
+                                        <strong>
+                                            <?= (int)$request['classroom_id'] ?>
+                                        </strong>
+                                    </div>
+
+                                    <div class="hr-detail-item">
+                                        <span>Requested At</span>
+                                        <strong>
+                                            <?= reqEscape($request['requested_at']) ?>
+                                        </strong>
+                                    </div>
+
+                                </div>
+
+                                <div class="hr-reason">
+                                    <strong>REASON FOR HANDOVER</strong>
+
+                                    <p><?= nl2br(reqEscape($request['reason'])) ?></p>
+                                </div>
+
+                                <?php if ($status === 'PENDING'): ?>
+
+                                    <div class="hr-buttons">
+
+                                        <button type="button"
+                                                class="hr-accept-btn"
+                                                onclick="respondRequest(
+                                                    <?= (int)$request['request_id'] ?>,
+                                                    'ACCEPTED'
+                                                )">
+                                            ✓ Accept Request
+                                        </button>
+
+                                        <button type="button"
+                                                class="hr-reject-btn"
+                                                onclick="respondRequest(
+                                                    <?= (int)$request['request_id'] ?>,
+                                                    'REJECTED'
+                                                )">
+                                            ✕ Reject Request
+                                        </button>
+
+                                    </div>
+
+                                <?php endif; ?>
+
+                            </article>
+
+                        <?php endforeach; ?>
+
+                    <?php endif; ?>
+
+                </div>
+            </section>
+
+            <footer class="hr-footer">
+                <span>
+                    © <?= date('Y') ?> Smart Faculty Assistant Portal
+                </span>
+                <span>Faculty Handover Management</span>
+            </footer>
+
+        </main>
+    </div>
 </div>
 
-
 <script>
+/* MOBILE SIDEBAR */
 
+(function () {
+    const button = document.getElementById('hr-menu-button');
+    const sidebar = document.getElementById('hr-sidebar');
 
-/* =========================================================
-   RESPOND TO REQUEST
-   ========================================================= */
+    if (!button || !sidebar) return;
 
-async function respondRequest(
-    requestId,
-    responseStatus
-) {
+    button.addEventListener('click', function () {
+        const open = sidebar.classList.toggle('open');
+        button.setAttribute('aria-expanded', String(open));
+    });
 
+    document.addEventListener('keydown', function (event) {
+        if (event.key === 'Escape') {
+            sidebar.classList.remove('open');
+            button.setAttribute('aria-expanded', 'false');
+        }
+    });
+})();
+
+/* ORIGINAL HANDOVER RESPONSE FUNCTION */
+
+async function respondRequest(requestId, responseStatus) {
 
     let message;
 
-
-    if (
-        responseStatus === 'ACCEPTED'
-    ) {
-
+    if (responseStatus === 'ACCEPTED') {
         message =
             "Are you sure you want to ACCEPT this handover request?";
-
     } else {
-
         message =
             "Are you sure you want to REJECT this handover request?";
-
     }
 
-
-    const confirmed =
-        confirm(message);
-
+    const confirmed = confirm(message);
 
     if (!confirmed) {
-
         return;
     }
 
+    const formData = new FormData();
 
-    const formData =
-        new FormData();
-
-
-    formData.append(
-        "request_id",
-        requestId
-    );
-
-
-    formData.append(
-        "status",
-        responseStatus
-    );
-
+    formData.append("request_id", requestId);
+    formData.append("status", responseStatus);
 
     try {
-
-
-        const response =
-            await fetch(
-                "../api/respond_handover.php",
-                {
-                    method: "POST",
-                    body: formData
-                }
-            );
-
-
-        const text =
-            await response.text();
-
-
-        console.log(
-            "Respond Handover API:",
-            text
+        const response = await fetch(
+            "../api/respond_handover.php",
+            {
+                method: "POST",
+                body: formData
+            }
         );
 
+        const text = await response.text();
+
+        console.log("Respond Handover API:", text);
 
         let data;
 
-
         try {
-
-            data =
-                JSON.parse(text);
-
+            data = JSON.parse(text);
         } catch (error) {
-
             showError(
-                "Invalid server response:\n\n" +
-                text
+                "Invalid server response:\n\n" + text
             );
-
             return;
         }
 
-
         if (data.success) {
 
+            showSuccess(data.message);
 
-            showSuccess(
-                data.message
-            );
-
-
-            setTimeout(
-                function() {
-
-                    location.reload();
-
-                },
-                1200
-            );
-
+            setTimeout(function () {
+                location.reload();
+            }, 1200);
 
         } else {
-
 
             showError(
                 data.message ||
                 "Unable to update request."
             );
-
         }
-
 
     } catch (error) {
 
-
         console.error(error);
-
 
         showError(
             "Unable to connect to server.\n\n" +
             error.message
         );
-
     }
-
 }
 
-
-/* =========================================================
-   SHOW SUCCESS
-   ========================================================= */
+/* SUCCESS MESSAGE */
 
 function showSuccess(message) {
 
-    const box =
-        document.getElementById(
-            "successMessage"
-        );
+    const box = document.getElementById("successMessage");
+    const errorBox = document.getElementById("errorMessage");
 
-
-    box.innerText =
-        message;
-
-
-    box.style.display =
-        "block";
-
-
-    document.getElementById(
-        "errorMessage"
-    ).style.display =
-        "none";
-
+    box.innerText = message;
+    box.style.display = "block";
+    errorBox.style.display = "none";
 }
 
-
-/* =========================================================
-   SHOW ERROR
-   ========================================================= */
+/* ERROR MESSAGE */
 
 function showError(message) {
 
-    const box =
-        document.getElementById(
-            "errorMessage"
-        );
+    const box = document.getElementById("errorMessage");
+    const successBox = document.getElementById("successMessage");
 
-
-    box.innerText =
-        message;
-
-
-    box.style.display =
-        "block";
-
-
-    document.getElementById(
-        "successMessage"
-    ).style.display =
-        "none";
-
+    box.innerText = message;
+    box.style.display = "block";
+    successBox.style.display = "none";
 }
-
-
 </script>
 
-
 </body>
-
 </html>

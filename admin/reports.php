@@ -1,1376 +1,251 @@
 <?php
-
 require_once "../includes/auth-check.php";
 require_once "../includes/role-check.php";
-
 requireRole("HOD");
-
 require_once "../config/database.php";
 
-$pageTitle = "Reports";
+$pageTitle = "Student Attendance Reports";
 
-
-/*
-|--------------------------------------------------------------------------
-| FILTER VALUES
-|--------------------------------------------------------------------------
-*/
-
-$selectedSection = isset($_GET["section_id"])
-    ? (int)$_GET["section_id"]
-    : 0;
-
-$selectedDay = isset($_GET["day"])
-    ? strtoupper(trim($_GET["day"]))
-    : "";
-
-$selectedStatus = isset($_GET["status"])
-    ? strtoupper(trim($_GET["status"]))
-    : "";
-
-
-/*
-|--------------------------------------------------------------------------
-| VALID DAYS
-|--------------------------------------------------------------------------
-*/
-
-$validDays = [
-    "MONDAY",
-    "TUESDAY",
-    "WEDNESDAY",
-    "THURSDAY",
-    "FRIDAY",
-    "SATURDAY"
-];
-
-
-/*
-|--------------------------------------------------------------------------
-| VALID STATUS
-|--------------------------------------------------------------------------
-*/
-
-$validStatuses = [
-    "DRAFT",
-    "PUBLISHED"
-];
-
-if (!in_array($selectedDay, $validDays, true)) {
-    $selectedDay = "";
+function reportEscape($value): string {
+    return htmlspecialchars((string)$value, ENT_QUOTES, "UTF-8");
 }
 
-if (!in_array($selectedStatus, $validStatuses, true)) {
-    $selectedStatus = "";
+$attendancePeriod = strtolower(trim($_GET['attendance_period'] ?? 'weekly'));
+if (!in_array($attendancePeriod, ['weekly', 'monthly', 'semester'], true)) {
+    $attendancePeriod = 'weekly';
 }
-
-
-/*
-|--------------------------------------------------------------------------
-| GET SECTIONS
-|--------------------------------------------------------------------------
-*/
-
-$sql = "
-    SELECT
-        section_id,
-        section_name
-    FROM sections
-    ORDER BY section_name
-";
-
-$sectionListResult = $conn->query($sql);
-
-
-/*
-|--------------------------------------------------------------------------
-| TIMETABLE SUMMARY
-|--------------------------------------------------------------------------
-*/
-
-$sql = "
-    SELECT
-        COUNT(*) AS total_entries,
-
-        SUM(
-            CASE
-                WHEN status = 'PUBLISHED'
-                THEN 1
-                ELSE 0
-            END
-        ) AS published_entries,
-
-        SUM(
-            CASE
-                WHEN status = 'DRAFT'
-                THEN 1
-                ELSE 0
-            END
-        ) AS draft_entries
-
-    FROM timetable
-";
-
-$result = $conn->query($sql);
-
-$summary = [
-    "total_entries" => 0,
-    "published_entries" => 0,
-    "draft_entries" => 0
-];
-
-if ($result) {
-
-    $row = $result->fetch_assoc();
-
-    $summary["total_entries"] =
-        (int)$row["total_entries"];
-
-    $summary["published_entries"] =
-        (int)$row["published_entries"];
-
-    $summary["draft_entries"] =
-        (int)$row["draft_entries"];
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| SECTION-WISE TIMETABLE
-|--------------------------------------------------------------------------
-*/
-
-$sql = "
-    SELECT
-        sec.section_name,
-        COUNT(t.timetable_id) AS total_periods
-
-    FROM sections sec
-
-    LEFT JOIN timetable t
-        ON sec.section_id = t.section_id
-
-    GROUP BY
-        sec.section_id,
-        sec.section_name
-
-    ORDER BY
-        sec.section_name
-";
-
-$sectionResult = $conn->query($sql);
-
-
-/*
-|--------------------------------------------------------------------------
-| FACULTY TEACHING PERIODS
-|--------------------------------------------------------------------------
-*/
-
-$sql = "
-    SELECT
-        f.faculty_code,
-        f.faculty_name,
-        COUNT(t.timetable_id) AS total_periods
-
-    FROM faculty f
-
-    LEFT JOIN timetable t
-        ON f.faculty_id = t.faculty_id
-
-    GROUP BY
-        f.faculty_id,
-        f.faculty_code,
-        f.faculty_name
-
-    ORDER BY
-        f.faculty_code
-";
-
-$facultyResult = $conn->query($sql);
-
-
-/*
-|--------------------------------------------------------------------------
-| SUBJECT-WISE PERIODS
-|--------------------------------------------------------------------------
-*/
-
-$sql = "
-    SELECT
-        s.subject_code,
-        s.subject_name,
-        s.subject_type,
-        COUNT(t.timetable_id) AS total_periods
-
-    FROM subjects s
-
-    LEFT JOIN timetable t
-        ON s.subject_id = t.subject_id
-
-    GROUP BY
-        s.subject_id,
-        s.subject_code,
-        s.subject_name,
-        s.subject_type
-
-    ORDER BY
-        s.subject_code
-";
-
-$subjectResult = $conn->query($sql);
-
-
-/*
-|--------------------------------------------------------------------------
-| CLASSROOM USAGE
-|--------------------------------------------------------------------------
-*/
-
-$sql = "
-    SELECT
-        c.room_number,
-        c.room_type,
-        COUNT(t.timetable_id) AS total_periods
-
-    FROM classrooms c
-
-    LEFT JOIN timetable t
-        ON c.classroom_id = t.classroom_id
-
-    GROUP BY
-        c.classroom_id,
-        c.room_number,
-        c.room_type
-
-    ORDER BY
-        c.room_number
-";
-
-$classroomResult = $conn->query($sql);
-
-
-/*
-|--------------------------------------------------------------------------
-| DETAILED TIMETABLE REPORT
-|--------------------------------------------------------------------------
-*/
-
-$where = [];
-$params = [];
-$types = "";
-
-
-/*
-| Section filter
-*/
-
-if ($selectedSection > 0) {
-
-    $where[] = "t.section_id = ?";
-
-    $params[] = $selectedSection;
-
-    $types .= "i";
-}
-
-
-/*
-| Day filter
-*/
-
-if ($selectedDay !== "") {
-
-    $where[] = "t.day = ?";
-
-    $params[] = $selectedDay;
-
-    $types .= "s";
-}
-
-
-/*
-| Status filter
-*/
-
-if ($selectedStatus !== "") {
-
-    $where[] = "t.status = ?";
-
-    $params[] = $selectedStatus;
-
-    $types .= "s";
-}
-
-
-$detailSql = "
-    SELECT
-
-        t.timetable_id,
-
-        t.day,
-
-        p.period_number,
-
-        p.start_time,
-
-        p.end_time,
-
-        sec.section_name,
-
-        s.subject_code,
-
-        s.subject_name,
-
-        s.subject_type,
-
-        f.faculty_code,
-
-        f.faculty_name,
-
-        c.room_number,
-
-        c.room_type,
-
-        t.status
-
-    FROM timetable t
-
-    INNER JOIN periods p
-        ON t.period_id = p.period_id
-
-    INNER JOIN sections sec
-        ON t.section_id = sec.section_id
-
-    INNER JOIN subjects s
-        ON t.subject_id = s.subject_id
-
-    INNER JOIN faculty f
-        ON t.faculty_id = f.faculty_id
-
-    INNER JOIN classrooms c
-        ON t.classroom_id = c.classroom_id
-";
-
-
-if (count($where) > 0) {
-
-    $detailSql .=
-        " WHERE " .
-        implode(" AND ", $where);
-}
-
-
-$detailSql .= "
-    ORDER BY
-
-        FIELD(
-            t.day,
-            'MONDAY',
-            'TUESDAY',
-            'WEDNESDAY',
-            'THURSDAY',
-            'FRIDAY',
-            'SATURDAY'
-        ),
-
-        p.period_number,
-
-        sec.section_name
-";
-
-
-$detailStmt = $conn->prepare($detailSql);
-
-$detailResult = false;
-
-
-if ($detailStmt) {
-
-    if (count($params) > 0) {
-
-        $bindParams = [];
-
-        $bindParams[] = $types;
-
-        foreach ($params as $key => $value) {
-            $bindParams[] = &$params[$key];
+$attendanceSection = isset($_GET['attendance_section']) ? (int)$_GET['attendance_section'] : 0;
+$today = new DateTimeImmutable('today');
+$currentMonday = $today->modify('monday this week');
+$attendanceWeekStart = $_GET['week_start'] ?? $currentMonday->format('Y-m-d');
+$attendanceMonth = (isset($_GET['report_month']) && preg_match('/^\d{4}-\d{2}$/', $_GET['report_month']))
+    ? $_GET['report_month'] : $today->format('Y-m');
+$attendanceSemesterStart = $_GET['semester_start'] ?? $today->modify('first day of this month')->modify('-3 months')->format('Y-m-d');
+$attendanceSemesterEnd = $_GET['semester_end'] ?? $today->format('Y-m-d');
+
+$attendanceStart = '';
+$attendanceEnd = '';
+$attendancePeriodLabel = '';
+$attendanceDateError = '';
+
+try {
+    if ($attendancePeriod === 'weekly') {
+        $weekDate = new DateTimeImmutable($attendanceWeekStart);
+        $attendanceStart = $weekDate->format('Y-m-d');
+        $attendanceEnd = $weekDate->modify('+6 days')->format('Y-m-d');
+        $attendancePeriodLabel = 'Weekly report: ' . $attendanceStart . ' to ' . $attendanceEnd;
+    } elseif ($attendancePeriod === 'monthly') {
+        $monthDate = DateTimeImmutable::createFromFormat('!Y-m', $attendanceMonth);
+        if (!$monthDate || $monthDate->format('Y-m') !== $attendanceMonth) {
+            throw new Exception('Choose a valid month.');
         }
-
-        call_user_func_array(
-            [$detailStmt, "bind_param"],
-            $bindParams
-        );
+        $attendanceStart = $monthDate->modify('first day of this month')->format('Y-m-d');
+        $attendanceEnd = $monthDate->modify('last day of this month')->format('Y-m-d');
+        $attendancePeriodLabel = 'Monthly report: ' . $monthDate->format('F Y');
+    } else {
+        $semesterStartDate = new DateTimeImmutable($attendanceSemesterStart);
+        $semesterEndDate = new DateTimeImmutable($attendanceSemesterEnd);
+        if ($semesterStartDate > $semesterEndDate) {
+            throw new Exception('Semester start date must be on or before the end date.');
+        }
+        $attendanceStart = $semesterStartDate->format('Y-m-d');
+        $attendanceEnd = $semesterEndDate->format('Y-m-d');
+        $attendancePeriodLabel = 'Semester report: ' . $attendanceStart . ' to ' . $attendanceEnd;
     }
-
-    $detailStmt->execute();
-
-    $detailResult =
-        $detailStmt->get_result();
+} catch (Throwable $e) {
+    $attendanceDateError = $e->getMessage();
+    $attendanceStart = $today->format('Y-m-d');
+    $attendanceEnd = $today->format('Y-m-d');
+    $attendancePeriodLabel = 'Attendance report';
 }
 
+$sectionOptions = $conn->query("SELECT section_id, section_name FROM sections ORDER BY section_name");
+$attendanceRows = [];
+$attendanceSummary = ['students' => 0, 'present' => 0, 'absent' => 0, 'percentage' => 0.0];
+$attendanceQueryError = '';
+
+if ($attendanceDateError === '') {
+    // Count calendar days, not individual periods. A date is present if any recorded period is PRESENT.
+    // It is absent only when every recorded period that date is ABSENT.
+    $sql = "
+        SELECT
+            st.student_id,
+            st.register_number,
+            st.student_name,
+            sec.section_name,
+            COALESCE(SUM(CASE WHEN daily.has_present = 1 THEN 1 ELSE 0 END), 0) AS present_days,
+            COALESCE(SUM(CASE WHEN daily.has_present = 0 AND daily.attendance_date IS NOT NULL THEN 1 ELSE 0 END), 0) AS absent_days
+        FROM students st
+        INNER JOIN sections sec ON sec.section_id = st.section_id
+        LEFT JOIN (
+            SELECT student_id, attendance_date,
+                   MAX(CASE WHEN status = 'PRESENT' THEN 1 ELSE 0 END) AS has_present
+            FROM attendance
+            WHERE attendance_date BETWEEN ? AND ?
+            GROUP BY student_id, attendance_date
+        ) daily ON daily.student_id = st.student_id
+        WHERE (? = 0 OR st.section_id = ?)
+        GROUP BY st.student_id, st.register_number, st.student_name, sec.section_name
+        ORDER BY sec.section_name, st.register_number
+    ";
+    $stmt = $conn->prepare($sql);
+    if ($stmt) {
+        $stmt->bind_param('ssii', $attendanceStart, $attendanceEnd, $attendanceSection, $attendanceSection);
+        if ($stmt->execute()) {
+            $result = $stmt->get_result();
+            while ($row = $result->fetch_assoc()) {
+                $row['present_days'] = (int)$row['present_days'];
+                $row['absent_days'] = (int)$row['absent_days'];
+                $totalDays = $row['present_days'] + $row['absent_days'];
+                $row['percentage'] = $totalDays > 0 ? round(($row['present_days'] / $totalDays) * 100, 2) : 0.0;
+                $attendanceRows[] = $row;
+                $attendanceSummary['students']++;
+                $attendanceSummary['present'] += $row['present_days'];
+                $attendanceSummary['absent'] += $row['absent_days'];
+            }
+            $totalReportedDays = $attendanceSummary['present'] + $attendanceSummary['absent'];
+            $attendanceSummary['percentage'] = $totalReportedDays > 0
+                ? round(($attendanceSummary['present'] / $totalReportedDays) * 100, 2) : 0.0;
+        } else {
+            $attendanceQueryError = 'Could not generate the attendance report.';
+        }
+        $stmt->close();
+    } else {
+        $attendanceQueryError = 'Could not prepare the attendance report query.';
+    }
+}
 ?>
-
 <?php require_once "../includes/header.php"; ?>
-
 <?php require_once "../includes/navbar.php"; ?>
-
 <?php require_once "../includes/sidebar.php"; ?>
 
+<style>
+main.reports-page{min-height:100vh;color:#edf1fb;box-sizing:border-box}
+.reports-page *,.reports-page *::before,.reports-page *::after{box-sizing:border-box}
+.reports-wrap{width:100%;max-width:1450px;margin:0 auto}
+.reports-panel{width:100%;min-width:0;margin-bottom:25px;padding:26px;border:1px solid #2d3a50;border-radius:18px;background:#172235;box-shadow:0 12px 28px rgba(0,0,0,.12)}
+.reports-panel-header{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:18px;margin-bottom:22px}
+.reports-panel-header h1{margin:0;color:#fff;font-size:25px;font-weight:800}
+.reports-description{margin:9px 0 0;color:#a8b6ce;font-size:13px;line-height:1.6}
+.reports-filter{display:grid;grid-template-columns:repeat(3,minmax(140px,1fr)) auto;gap:16px;align-items:end;padding:24px;border:1px solid #34445d;border-radius:14px;background:#111c2e;margin-bottom:18px}
+.reports-filter-field{display:flex;flex-direction:column;gap:9px;min-width:0}
+.reports-filter-field label{color:#edf1fb;font-size:13px;font-weight:700}
+.reports-filter-field select,.reports-filter-field input{width:100%;min-width:0;min-height:46px;padding:10px 12px;border:1px solid #3a4962;border-radius:10px;outline:none;background:#10192a;color:#f4f6ff;color-scheme:dark;font-family:inherit;font-size:13px}
+.reports-actions{display:flex;gap:10px;align-items:center}
+.reports-button,.reports-reset,.reports-print{display:inline-flex;align-items:center;justify-content:center;min-height:46px;padding:0 18px;border:1px solid transparent;border-radius:10px;font-size:13px;font-weight:750;text-decoration:none;cursor:pointer;white-space:nowrap}
+.reports-button{background:#9c83ff;color:#11152b}.reports-reset{background:#28364d;color:#f4f6ff;border-color:#43516a}.reports-print{background:#302a55;color:#f3edff;border-color:#7664bb}
+.reports-summary{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px;margin:18px 0 22px}
+.reports-stat{min-width:0;padding:22px;border:1px solid #2d3a50;border-radius:16px;background:#172235}
+.reports-stat-label{margin:0 0 14px;color:#baa5ff;font-size:13px;font-weight:750}.reports-stat-number{color:#fff;font-size:32px;font-weight:800}
+.reports-table-scroll{width:100%;overflow-x:auto;border:1px solid #2d3a50;border-radius:12px}
+.reports-table{width:100%;border-collapse:collapse;min-width:760px;background:#172235}
+.reports-table th{padding:17px 18px;text-align:left;background:#243550;color:#e8e3ff;font-size:12px;font-weight:800;white-space:nowrap}
+.reports-table td{padding:16px 18px;border-top:1px solid #2d3a50;color:#eaf0fb;font-size:13px}
+.reports-empty{text-align:center;color:#a8b6ce!important;padding:28px!important}
+@media(max-width:1000px){.reports-filter{grid-template-columns:repeat(2,minmax(0,1fr))}.reports-actions{flex-wrap:wrap}}
+@media(max-width:650px){.reports-panel{padding:16px}.reports-filter,.reports-summary{grid-template-columns:1fr}.reports-actions>*{flex:1}}
+@media print{body *{visibility:hidden!important}.reports-page,.reports-page *{visibility:visible!important}.reports-page{position:absolute;left:0;top:0;width:100%;color:#111!important;background:#fff!important}.reports-panel,.reports-stat,.reports-table{background:#fff!important;color:#111!important;box-shadow:none!important;border-color:#ccc!important}.reports-panel-header h1,.reports-stat-number,.reports-stat-label,.reports-table td,.reports-table th,.reports-description{color:#111!important}.reports-filter,.reports-print,.reports-reset,.reports-button,.navbar,.sidebar{display:none!important}.reports-table th{background:#eee!important}}
+</style>
 
-<main>
-
-    <!-- =====================================================
-         PAGE HEADER
-         ===================================================== -->
-
-    <div class="page-header">
-
+<main class="reports-page">
+  <div class="reports-wrap">
+    <section class="reports-panel" id="attendance-reports">
+      <div class="reports-panel-header">
         <div>
-
-            <h1>
-                Reports
-            </h1>
-
-            <p>
-                View timetable, faculty, subject and classroom reports.
-            </p>
-
+          <h1>Student Attendance Reports</h1>
+          <p class="reports-description">Generate weekly, monthly, or semester-wise attendance for each CSE section.</p>
         </div>
+        <button type="button" class="reports-print" onclick="window.print()">Print Report</button>
+      </div>
 
-    </div>
+      <?php if ($attendanceDateError !== ''): ?><p class="reports-description" style="color:#ffd2a8"><?= reportEscape($attendanceDateError) ?></p><?php endif; ?>
+      <?php if ($attendanceQueryError !== ''): ?><p class="reports-description" style="color:#ffb4b4"><?= reportEscape($attendanceQueryError) ?></p><?php endif; ?>
 
-
-    <!-- =====================================================
-         SUMMARY CARDS
-         ===================================================== -->
-
-    <div class="dashboard-cards">
-
-        <div class="dashboard-card">
-
-            <h3>
-                Total Timetable Entries
-            </h3>
-
-            <div class="number">
-                <?php
-                echo $summary["total_entries"];
-                ?>
-            </div>
-
+      <form method="GET" action="reports.php#attendance-reports" class="reports-filter" id="attendanceFilter">
+        <div class="reports-filter-field">
+          <label for="attendance_period">Report period</label>
+          <select name="attendance_period" id="attendance_period">
+            <option value="weekly" <?= $attendancePeriod === 'weekly' ? 'selected' : '' ?>>Weekly</option>
+            <option value="monthly" <?= $attendancePeriod === 'monthly' ? 'selected' : '' ?>>Monthly</option>
+            <option value="semester" <?= $attendancePeriod === 'semester' ? 'selected' : '' ?>>Semester</option>
+          </select>
         </div>
-
-
-        <div class="dashboard-card">
-
-            <h3>
-                Published Entries
-            </h3>
-
-            <div class="number">
-                <?php
-                echo $summary["published_entries"];
-                ?>
-            </div>
-
+        <div class="reports-filter-field">
+          <label for="attendance_section">Section</label>
+          <select name="attendance_section" id="attendance_section">
+            <option value="0" <?= $attendanceSection === 0 ? 'selected' : '' ?>>All Sections</option>
+            <?php if ($sectionOptions): while ($secOption = $sectionOptions->fetch_assoc()): ?>
+              <option value="<?= (int)$secOption['section_id'] ?>" <?= $attendanceSection === (int)$secOption['section_id'] ? 'selected' : '' ?>><?= reportEscape($secOption['section_name']) ?></option>
+            <?php endwhile; endif; ?>
+          </select>
         </div>
-
-
-        <div class="dashboard-card">
-
-            <h3>
-                Draft Entries
-            </h3>
-
-            <div class="number">
-                <?php
-                echo $summary["draft_entries"];
-                ?>
-            </div>
-
+        <div class="reports-filter-field attendance-date-field" data-for="weekly">
+          <label for="week_start">Week starting date</label>
+          <input type="date" id="week_start" name="week_start" value="<?= reportEscape($attendanceWeekStart) ?>">
         </div>
-
-    </div>
-
-
-    <!-- =====================================================
-         DETAILED TIMETABLE REPORT
-         ===================================================== -->
-
-    <div class="table-container">
-
-        <div
-            style="
-                display:flex;
-                justify-content:space-between;
-                align-items:center;
-                gap:15px;
-                margin-bottom:20px;
-                flex-wrap:wrap;
-            "
-        >
-
-            <div>
-
-                <h2>
-                    Detailed Timetable Report
-                </h2>
-
-                <p
-                    style="
-                        color:#64748b;
-                        margin-top:5px;
-                    "
-                >
-                    Filter and view timetable entries.
-                </p>
-
-            </div>
-
-
-            <button
-                type="button"
-                class="btn btn-secondary"
-                onclick="window.print();"
-            >
-                Print Report
-            </button>
-
+        <div class="reports-filter-field attendance-date-field" data-for="monthly">
+          <label for="report_month">Month</label>
+          <input type="month" id="report_month" name="report_month" value="<?= reportEscape($attendanceMonth) ?>">
         </div>
-
-
-        <!-- FILTER FORM -->
-
-        <form
-            method="GET"
-            action="reports.php"
-            style="
-                max-width:none;
-                background:#f8fafc;
-                padding:20px;
-                border-radius:8px;
-                margin-bottom:20px;
-            "
-        >
-
-            <div
-                style="
-                    display:grid;
-                    grid-template-columns:
-                        repeat(auto-fit,minmax(180px,1fr));
-                    gap:15px;
-                    align-items:end;
-                "
-            >
-
-                <!-- SECTION -->
-
-                <div class="form-group">
-
-                    <label for="section_id">
-                        Section
-                    </label>
-
-                    <select
-                        name="section_id"
-                        id="section_id"
-                    >
-
-                        <option value="0">
-                            All Sections
-                        </option>
-
-                        <?php if (
-                            $sectionListResult &&
-                            $sectionListResult->num_rows > 0
-                        ): ?>
-
-                            <?php while (
-                                $section =
-                                $sectionListResult->fetch_assoc()
-                            ): ?>
-
-                                <option
-                                    value="<?php
-                                        echo (int)
-                                            $section["section_id"];
-                                    ?>"
-                                    <?php
-                                    if (
-                                        $selectedSection ===
-                                        (int)$section["section_id"]
-                                    ) {
-                                        echo "selected";
-                                    }
-                                    ?>
-                                >
-
-                                    <?php
-                                    echo htmlspecialchars(
-                                        $section["section_name"]
-                                    );
-                                    ?>
-
-                                </option>
-
-                            <?php endwhile; ?>
-
-                        <?php endif; ?>
-
-                    </select>
-
-                </div>
-
-
-                <!-- DAY -->
-
-                <div class="form-group">
-
-                    <label for="day">
-                        Day
-                    </label>
-
-                    <select
-                        name="day"
-                        id="day"
-                    >
-
-                        <option value="">
-                            All Days
-                        </option>
-
-                        <?php foreach (
-                            $validDays as $day
-                        ): ?>
-
-                            <option
-                                value="<?php
-                                    echo $day;
-                                ?>"
-                                <?php
-                                if (
-                                    $selectedDay === $day
-                                ) {
-                                    echo "selected";
-                                }
-                                ?>
-                            >
-
-                                <?php
-                                echo $day;
-                                ?>
-
-                            </option>
-
-                        <?php endforeach; ?>
-
-                    </select>
-
-                </div>
-
-
-                <!-- STATUS -->
-
-                <div class="form-group">
-
-                    <label for="status">
-                        Status
-                    </label>
-
-                    <select
-                        name="status"
-                        id="status"
-                    >
-
-                        <option value="">
-                            All Status
-                        </option>
-
-                        <option
-                            value="DRAFT"
-                            <?php
-                            if (
-                                $selectedStatus === "DRAFT"
-                            ) {
-                                echo "selected";
-                            }
-                            ?>
-                        >
-                            Draft
-                        </option>
-
-                        <option
-                            value="PUBLISHED"
-                            <?php
-                            if (
-                                $selectedStatus === "PUBLISHED"
-                            ) {
-                                echo "selected";
-                            }
-                            ?>
-                        >
-                            Published
-                        </option>
-
-                    </select>
-
-                </div>
-
-
-                <!-- BUTTONS -->
-
-                <div class="form-actions">
-
-                    <button
-                        type="submit"
-                        class="btn btn-primary"
-                    >
-                        Generate Report
-                    </button>
-
-
-                    <a
-                        href="reports.php"
-                        class="btn btn-secondary"
-                    >
-                        Reset
-                    </a>
-
-                </div>
-
-            </div>
-
-        </form>
-
-
-        <!-- DETAILED TABLE -->
-
-        <div
-            style="
-                overflow-x:auto;
-            "
-        >
-
-            <table>
-
-                <thead>
-
-                    <tr>
-
-                        <th>
-                            Day
-                        </th>
-
-                        <th>
-                            Period
-                        </th>
-
-                        <th>
-                            Time
-                        </th>
-
-                        <th>
-                            Section
-                        </th>
-
-                        <th>
-                            Subject
-                        </th>
-
-                        <th>
-                            Faculty
-                        </th>
-
-                        <th>
-                            Room
-                        </th>
-
-                        <th>
-                            Status
-                        </th>
-
-                    </tr>
-
-                </thead>
-
-
-                <tbody>
-
-                    <?php if (
-                        $detailResult &&
-                        $detailResult->num_rows > 0
-                    ): ?>
-
-                        <?php while (
-                            $row =
-                            $detailResult->fetch_assoc()
-                        ): ?>
-
-                            <tr>
-
-                                <td>
-                                    <?php
-                                    echo htmlspecialchars(
-                                        $row["day"]
-                                    );
-                                    ?>
-                                </td>
-
-
-                                <td>
-
-                                    P<?php
-                                    echo (int)
-                                        $row["period_number"];
-                                    ?>
-
-                                </td>
-
-
-                                <td>
-
-                                    <?php
-                                    echo date(
-                                        "h:i A",
-                                        strtotime(
-                                            $row["start_time"]
-                                        )
-                                    );
-                                    ?>
-
-                                    -
-
-                                    <?php
-                                    echo date(
-                                        "h:i A",
-                                        strtotime(
-                                            $row["end_time"]
-                                        )
-                                    );
-                                    ?>
-
-                                </td>
-
-
-                                <td>
-
-                                    <?php
-                                    echo htmlspecialchars(
-                                        $row["section_name"]
-                                    );
-                                    ?>
-
-                                </td>
-
-
-                                <td>
-
-                                    <strong>
-
-                                        <?php
-                                        echo htmlspecialchars(
-                                            $row["subject_code"]
-                                        );
-                                        ?>
-
-                                    </strong>
-
-                                    <br>
-
-                                    <small>
-
-                                        <?php
-                                        echo htmlspecialchars(
-                                            $row["subject_name"]
-                                        );
-                                        ?>
-
-                                    </small>
-
-                                </td>
-
-
-                                <td>
-
-                                    <?php
-                                    echo htmlspecialchars(
-                                        $row["faculty_code"]
-                                    );
-                                    ?>
-
-                                    <br>
-
-                                    <small>
-
-                                        <?php
-                                        echo htmlspecialchars(
-                                            $row["faculty_name"]
-                                        );
-                                        ?>
-
-                                    </small>
-
-                                </td>
-
-
-                                <td>
-
-                                    <?php
-                                    echo htmlspecialchars(
-                                        $row["room_number"]
-                                    );
-                                    ?>
-
-                                    <br>
-
-                                    <small>
-
-                                        <?php
-                                        echo htmlspecialchars(
-                                            $row["room_type"]
-                                        );
-                                        ?>
-
-                                    </small>
-
-                                </td>
-
-
-                                <td>
-
-                                    <?php
-                                    if (
-                                        $row["status"] ===
-                                        "PUBLISHED"
-                                    ):
-                                    ?>
-
-                                        <span
-                                            class="status-active"
-                                        >
-                                            PUBLISHED
-                                        </span>
-
-                                    <?php else: ?>
-
-                                        <span
-                                            class="status-inactive"
-                                        >
-                                            DRAFT
-                                        </span>
-
-                                    <?php endif; ?>
-
-                                </td>
-
-                            </tr>
-
-                        <?php endwhile; ?>
-
-                    <?php else: ?>
-
-                        <tr>
-
-                            <td
-                                colspan="8"
-                                style="
-                                    text-align:center;
-                                    padding:25px;
-                                "
-                            >
-                                No timetable entries found
-                                for the selected filters.
-
-                            </td>
-
-                        </tr>
-
-                    <?php endif; ?>
-
-                </tbody>
-
-            </table>
-
+        <div class="reports-filter-field attendance-date-field" data-for="semester">
+          <label for="semester_start">Semester start</label>
+          <input type="date" id="semester_start" name="semester_start" value="<?= reportEscape($attendanceSemesterStart) ?>">
         </div>
+        <div class="reports-filter-field attendance-date-field" data-for="semester">
+          <label for="semester_end">Semester end</label>
+          <input type="date" id="semester_end" name="semester_end" value="<?= reportEscape($attendanceSemesterEnd) ?>">
+        </div>
+        <div class="reports-actions">
+          <button type="submit" class="reports-button">Generate Attendance</button>
+          <a href="reports.php#attendance-reports" class="reports-reset">Reset</a>
+        </div>
+      </form>
 
-    </div>
+      <p class="reports-description" style="margin:0 0 16px"><?= reportEscape($attendancePeriodLabel) ?>. Present and absent days are counted from attendance records saved during the selected period.</p>
 
+      <div class="reports-summary">
+        <div class="reports-stat"><h2 class="reports-stat-label">Students Listed</h2><div class="reports-stat-number"><?= (int)$attendanceSummary['students'] ?></div></div>
+        <div class="reports-stat"><h2 class="reports-stat-label">Overall Attendance</h2><div class="reports-stat-number"><?= number_format($attendanceSummary['percentage'], 2) ?>%</div></div>
+      </div>
 
-    <!-- =====================================================
-         SECTION-WISE REPORT
-         ===================================================== -->
-
-    <div class="table-container">
-
-        <h2 style="margin-bottom:15px;">
-            Section-wise Timetable
-        </h2>
-
-        <table>
-
-            <thead>
-
-                <tr>
-
-                    <th>
-                        Section
-                    </th>
-
-                    <th>
-                        Timetable Periods
-                    </th>
-
-                </tr>
-
-            </thead>
-
-
-            <tbody>
-
-                <?php if (
-                    $sectionResult &&
-                    $sectionResult->num_rows > 0
-                ): ?>
-
-                    <?php while (
-                        $row =
-                        $sectionResult->fetch_assoc()
-                    ): ?>
-
-                        <tr>
-
-                            <td>
-                                <?php
-                                echo htmlspecialchars(
-                                    $row["section_name"]
-                                );
-                                ?>
-                            </td>
-
-                            <td>
-                                <?php
-                                echo (int)
-                                    $row["total_periods"];
-                                ?>
-                            </td>
-
-                        </tr>
-
-                    <?php endwhile; ?>
-
-                <?php else: ?>
-
-                    <tr>
-
-                        <td colspan="2">
-                            No section data found.
-                        </td>
-
-                    </tr>
-
-                <?php endif; ?>
-
-            </tbody>
-
+      <div class="reports-table-scroll">
+        <table class="reports-table">
+          <thead><tr><th>Section</th><th>Register Number</th><th>Student Name</th><th>Present Days</th><th>Absent Days</th><th>Attendance %</th></tr></thead>
+          <tbody>
+          <?php if (count($attendanceRows) > 0): foreach ($attendanceRows as $arow): ?>
+            <tr>
+              <td><?= reportEscape($arow['section_name']) ?></td>
+              <td><strong><?= reportEscape($arow['register_number']) ?></strong></td>
+              <td><?= reportEscape($arow['student_name']) ?></td>
+              <td><?= (int)$arow['present_days'] ?></td>
+              <td><?= (int)$arow['absent_days'] ?></td>
+              <td><strong><?= number_format($arow['percentage'], 2) ?>%</strong></td>
+            </tr>
+          <?php endforeach; else: ?>
+            <tr><td colspan="6" class="reports-empty">No students found for the selected section.</td></tr>
+          <?php endif; ?>
+          </tbody>
         </table>
-
-    </div>
-
-
-    <!-- =====================================================
-         FACULTY REPORT
-         ===================================================== -->
-
-    <div class="table-container">
-
-        <h2 style="margin-bottom:15px;">
-            Faculty Teaching Periods
-        </h2>
-
-        <table>
-
-            <thead>
-
-                <tr>
-
-                    <th>
-                        Faculty Code
-                    </th>
-
-                    <th>
-                        Faculty Name
-                    </th>
-
-                    <th>
-                        Total Periods
-                    </th>
-
-                </tr>
-
-            </thead>
-
-
-            <tbody>
-
-                <?php if (
-                    $facultyResult &&
-                    $facultyResult->num_rows > 0
-                ): ?>
-
-                    <?php while (
-                        $row =
-                        $facultyResult->fetch_assoc()
-                    ): ?>
-
-                        <tr>
-
-                            <td>
-                                <?php
-                                echo htmlspecialchars(
-                                    $row["faculty_code"]
-                                );
-                                ?>
-                            </td>
-
-                            <td>
-                                <?php
-                                echo htmlspecialchars(
-                                    $row["faculty_name"]
-                                );
-                                ?>
-                            </td>
-
-                            <td>
-                                <strong>
-                                    <?php
-                                    echo (int)
-                                        $row["total_periods"];
-                                    ?>
-                                </strong>
-                            </td>
-
-                        </tr>
-
-                    <?php endwhile; ?>
-
-                <?php else: ?>
-
-                    <tr>
-
-                        <td colspan="3">
-                            No faculty timetable data found.
-                        </td>
-
-                    </tr>
-
-                <?php endif; ?>
-
-            </tbody>
-
-        </table>
-
-    </div>
-
-
-    <!-- =====================================================
-         SUBJECT REPORT
-         ===================================================== -->
-
-    <div class="table-container">
-
-        <h2 style="margin-bottom:15px;">
-            Subject-wise Periods
-        </h2>
-
-        <table>
-
-            <thead>
-
-                <tr>
-
-                    <th>
-                        Subject Code
-                    </th>
-
-                    <th>
-                        Subject Name
-                    </th>
-
-                    <th>
-                        Type
-                    </th>
-
-                    <th>
-                        Timetable Periods
-                    </th>
-
-                </tr>
-
-            </thead>
-
-
-            <tbody>
-
-                <?php if (
-                    $subjectResult &&
-                    $subjectResult->num_rows > 0
-                ): ?>
-
-                    <?php while (
-                        $row =
-                        $subjectResult->fetch_assoc()
-                    ): ?>
-
-                        <tr>
-
-                            <td>
-                                <?php
-                                echo htmlspecialchars(
-                                    $row["subject_code"]
-                                );
-                                ?>
-                            </td>
-
-                            <td>
-                                <?php
-                                echo htmlspecialchars(
-                                    $row["subject_name"]
-                                );
-                                ?>
-                            </td>
-
-                            <td>
-                                <?php
-                                echo htmlspecialchars(
-                                    $row["subject_type"]
-                                );
-                                ?>
-                            </td>
-
-                            <td>
-                                <?php
-                                echo (int)
-                                    $row["total_periods"];
-                                ?>
-                            </td>
-
-                        </tr>
-
-                    <?php endwhile; ?>
-
-                <?php else: ?>
-
-                    <tr>
-
-                        <td colspan="4">
-                            No subject timetable data found.
-                        </td>
-
-                    </tr>
-
-                <?php endif; ?>
-
-            </tbody>
-
-        </table>
-
-    </div>
-
-
-    <!-- =====================================================
-         CLASSROOM REPORT
-         ===================================================== -->
-
-    <div class="table-container">
-
-        <h2 style="margin-bottom:15px;">
-            Classroom Usage
-        </h2>
-
-        <table>
-
-            <thead>
-
-                <tr>
-
-                    <th>
-                        Room
-                    </th>
-
-                    <th>
-                        Type
-                    </th>
-
-                    <th>
-                        Used Periods
-                    </th>
-
-                </tr>
-
-            </thead>
-
-
-            <tbody>
-
-                <?php if (
-                    $classroomResult &&
-                    $classroomResult->num_rows > 0
-                ): ?>
-
-                    <?php while (
-                        $row =
-                        $classroomResult->fetch_assoc()
-                    ): ?>
-
-                        <tr>
-
-                            <td>
-                                <?php
-                                echo htmlspecialchars(
-                                    $row["room_number"]
-                                );
-                                ?>
-                            </td>
-
-                            <td>
-                                <?php
-                                echo htmlspecialchars(
-                                    $row["room_type"]
-                                );
-                                ?>
-                            </td>
-
-                            <td>
-                                <?php
-                                echo (int)
-                                    $row["total_periods"];
-                                ?>
-                            </td>
-
-                        </tr>
-
-                    <?php endwhile; ?>
-
-                <?php else: ?>
-
-                    <tr>
-
-                        <td colspan="3">
-                            No classroom data found.
-                        </td>
-
-                    </tr>
-
-                <?php endif; ?>
-
-            </tbody>
-
-        </table>
-
-    </div>
-
+      </div>
+    </section>
+  </div>
 </main>
 
+<script>
+(function () {
+  const periodSelect = document.getElementById('attendance_period');
+  const fields = document.querySelectorAll('.attendance-date-field');
+  function updateAttendanceFields() {
+    const selected = periodSelect.value;
+    fields.forEach(function (field) {
+      const active = field.dataset.for === selected;
+      field.style.display = active ? 'flex' : 'none';
+      field.querySelectorAll('input').forEach(function (input) { input.disabled = !active; });
+    });
+  }
+  periodSelect.addEventListener('change', updateAttendanceFields);
+  updateAttendanceFields();
+})();
+</script>
 
 <?php require_once "../includes/footer.php"; ?>

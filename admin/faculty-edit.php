@@ -1,44 +1,40 @@
+
 <?php
 
 require_once "../includes/auth-check.php";
 require_once "../includes/role-check.php";
-
 requireRole("HOD");
 
 require_once "../config/database.php";
 
 $pageTitle = "Edit Faculty";
+$error = "";
 
+function facultyEditEscape($value)
+{
+    return htmlspecialchars(
+        (string)($value ?? ""),
+        ENT_QUOTES,
+        "UTF-8"
+    );
+}
 
-/*
-|--------------------------------------------------------------------------
-| Validate Faculty ID
-|--------------------------------------------------------------------------
-*/
+/* VALIDATE ID */
 
 if (
     !isset($_GET["id"]) ||
-    !is_numeric($_GET["id"])
+    !ctype_digit((string)$_GET["id"]) ||
+    (int)$_GET["id"] <= 0
 ) {
-
-    header(
-        "Location: faculty.php?error=invalid_request"
-    );
-
+    header("Location: faculty.php?error=invalid_request");
     exit;
 }
 
-
 $faculty_id = (int)$_GET["id"];
 
+/* LOAD FACULTY */
 
-/*
-|--------------------------------------------------------------------------
-| Load Faculty
-|--------------------------------------------------------------------------
-*/
-
-$sql = "
+$stmt = $conn->prepare("
     SELECT
         f.faculty_id,
         f.user_id,
@@ -51,177 +47,133 @@ $sql = "
         f.is_hod,
         u.username,
         u.role
-
     FROM faculty f
-
-    INNER JOIN users u
-        ON f.user_id = u.user_id
-
+    INNER JOIN users u ON f.user_id = u.user_id
     WHERE f.faculty_id = ?
-
     LIMIT 1
-";
-
-$stmt = $conn->prepare($sql);
+");
 
 if (!$stmt) {
-
-    die("Database error.");
+    die("Unable to load faculty information.");
 }
 
-
-$stmt->bind_param(
-    "i",
-    $faculty_id
-);
-
+$stmt->bind_param("i", $faculty_id);
 $stmt->execute();
 
 $result = $stmt->get_result();
 
-
-if ($result->num_rows === 0) {
-
+if ($result->num_rows !== 1) {
     $stmt->close();
-
-    header(
-        "Location: faculty.php?error=not_found"
-    );
-
+    header("Location: faculty.php?error=not_found");
     exit;
 }
 
-
 $row = $result->fetch_assoc();
-
 $stmt->close();
 
+$user_id = (int)$row["user_id"];
+$faculty_code = $row["faculty_code"];
+$faculty_name = $row["faculty_name"];
+$email = $row["email"] ?? "";
+$phone = $row["phone"] ?? "";
+$designation = $row["designation"];
+$is_hod = (int)$row["is_hod"];
+$username = $row["username"];
 
-/*
-|--------------------------------------------------------------------------
-| Existing Values
-|--------------------------------------------------------------------------
-*/
+/* FORM SECURITY */
 
-$user_id =
-    (int)$row["user_id"];
+if (empty($_SESSION["faculty_edit_csrf"])) {
+    $_SESSION["faculty_edit_csrf"] =
+        bin2hex(random_bytes(32));
+}
 
-$faculty_code =
-    $row["faculty_code"];
-
-$faculty_name =
-    $row["faculty_name"];
-
-$email =
-    $row["email"];
-
-$phone =
-    $row["phone"];
-
-$department_id =
-    (int)$row["department_id"];
-
-$designation =
-    $row["designation"];
-
-$is_hod =
-    (int)$row["is_hod"];
-
-$username =
-    $row["username"];
-
-$error = "";
-
-
-/*
-|--------------------------------------------------------------------------
-| Form Submission
-|--------------------------------------------------------------------------
-*/
+/* UPDATE FACULTY */
 
 if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
-    $faculty_code =
-        trim($_POST["faculty_code"] ?? "");
+    $faculty_code = trim($_POST["faculty_code"] ?? "");
+    $faculty_name = trim($_POST["faculty_name"] ?? "");
+    $email = trim($_POST["email"] ?? "");
+    $phone = trim($_POST["phone"] ?? "");
+    $designation = trim(
+        $_POST["designation"] ?? "Assistant Professor"
+    );
+    $new_password = (string)($_POST["password"] ?? "");
+    $is_hod = isset($_POST["is_hod"]) ? 1 : 0;
 
-    $faculty_name =
-        trim($_POST["faculty_name"] ?? "");
+    $token = (string)($_POST["csrf_token"] ?? "");
 
-    $email =
-        trim($_POST["email"] ?? "");
+    if (!hash_equals(
+        $_SESSION["faculty_edit_csrf"],
+        $token
+    )) {
 
-    $phone =
-        trim($_POST["phone"] ?? "");
+        $error = "Session validation failed. Refresh and try again.";
 
-    $designation =
-        trim(
-            $_POST["designation"]
-            ?? "Assistant Professor"
-        );
+    } elseif ($faculty_code === "") {
 
-    $new_password =
-        $_POST["password"] ?? "";
+        $error = "Please enter the faculty code.";
 
-    $is_hod =
-        isset($_POST["is_hod"])
-        ? 1
-        : 0;
+    } elseif (strlen($faculty_code) > 20) {
 
-
-    /*
-    |--------------------------------------------------------------------------
-    | Validation
-    |--------------------------------------------------------------------------
-    */
-
-    if ($faculty_code === "") {
-
-        $error =
-            "Please enter the faculty code.";
+        $error = "Faculty code cannot exceed 20 characters.";
 
     } elseif ($faculty_name === "") {
 
-        $error =
-            "Please enter the faculty name.";
+        $error = "Please enter the faculty name.";
+
+    } elseif (strlen($faculty_name) > 100) {
+
+        $error = "Faculty name cannot exceed 100 characters.";
+
+    } elseif (
+        $email !== "" &&
+        (
+            strlen($email) > 100 ||
+            !filter_var($email, FILTER_VALIDATE_EMAIL)
+        )
+    ) {
+
+        $error = "Please enter a valid email address.";
+
+    } elseif (strlen($phone) > 20) {
+
+        $error = "Phone number cannot exceed 20 characters.";
 
     } elseif ($designation === "") {
 
-        $error =
-            "Please enter the designation.";
+        $error = "Please enter the designation.";
+
+    } elseif (strlen($designation) > 50) {
+
+        $error = "Designation cannot exceed 50 characters.";
 
     } elseif (
         $new_password !== "" &&
         strlen($new_password) < 6
     ) {
 
-        $error =
-            "New password must contain at least 6 characters.";
-    }
+        $error = "New password must contain at least 6 characters.";
 
+    } else {
 
-    /*
-    |--------------------------------------------------------------------------
-    | Duplicate Faculty Code
-    |--------------------------------------------------------------------------
-    */
+        try {
 
-    if ($error === "") {
+            /* DUPLICATE FACULTY CODE */
 
-        $sql = "
-            SELECT faculty_id
-            FROM faculty
-            WHERE faculty_code = ?
-            AND faculty_id != ?
-            LIMIT 1
-        ";
+            $stmt = $conn->prepare("
+                SELECT faculty_id
+                FROM faculty
+                WHERE faculty_code = ?
+                  AND faculty_id != ?
+                LIMIT 1
+            ");
 
-        $stmt = $conn->prepare($sql);
-
-        if (!$stmt) {
-
-            $error = "Database error.";
-
-        } else {
+            if (!$stmt) {
+                throw new RuntimeException(
+                    "Unable to check faculty code."
+                );
+            }
 
             $stmt->bind_param(
                 "si",
@@ -230,314 +182,204 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
             );
 
             $stmt->execute();
+            $duplicate = $stmt->get_result()->num_rows > 0;
+            $stmt->close();
 
-            $result = $stmt->get_result();
-
-            if ($result->num_rows > 0) {
-
-                $error =
-                    "Faculty code already exists.";
+            if ($duplicate) {
+                throw new RuntimeException(
+                    "Faculty code already exists."
+                );
             }
 
-            $stmt->close();
-        }
-    }
-
-
-    /*
-    |--------------------------------------------------------------------------
-    | Update Faculty
-    |--------------------------------------------------------------------------
-    */
-
-    if ($error === "") {
-
-        $conn->begin_transaction();
-
-        try {
-
             /*
-            |--------------------------------------------------------------------------
-            | If selected as HOD
-            |--------------------------------------------------------------------------
-            |
-            | First demote every other faculty member.
-            |
-            */
+             * IMPORTANT:
+             * The existing application uses one HOD role.
+             * If a new HOD is chosen, only existing HOD
+             * records are demoted, not all faculty records.
+             */
 
-            if ($is_hod === 1) {
+            $conn->begin_transaction();
 
-                /*
-                | Demote previous HOD in faculty table
-                */
+            try {
 
-                $sql = "
+                if ($is_hod === 1) {
+
+                    /* DEMOTE PREVIOUS HOD USER ACCOUNTS */
+
+                    $stmt = $conn->prepare("
+                        UPDATE users u
+                        INNER JOIN faculty f
+                            ON u.user_id = f.user_id
+                        SET u.role = 'FACULTY'
+                        WHERE f.is_hod = 1
+                          AND f.faculty_id != ?
+                          AND u.role = 'HOD'
+                    ");
+
+                    if (!$stmt) {
+                        throw new RuntimeException(
+                            "Unable to update previous HOD role."
+                        );
+                    }
+
+                    $stmt->bind_param("i", $faculty_id);
+
+                    if (!$stmt->execute()) {
+                        throw new RuntimeException(
+                            "Failed to update previous HOD role."
+                        );
+                    }
+
+                    $stmt->close();
+
+                    /* DEMOTE PREVIOUS HOD FACULTY RECORDS */
+
+                    $stmt = $conn->prepare("
+                        UPDATE faculty
+                        SET is_hod = 0
+                        WHERE is_hod = 1
+                          AND faculty_id != ?
+                    ");
+
+                    if (!$stmt) {
+                        throw new RuntimeException(
+                            "Unable to update previous HOD."
+                        );
+                    }
+
+                    $stmt->bind_param("i", $faculty_id);
+
+                    if (!$stmt->execute()) {
+                        throw new RuntimeException(
+                            "Failed to update previous HOD."
+                        );
+                    }
+
+                    $stmt->close();
+                }
+
+                /* UPDATE FACULTY INFORMATION */
+
+                $stmt = $conn->prepare("
                     UPDATE faculty
-                    SET is_hod = 0
-                    WHERE faculty_id != ?
-                ";
-
-                $stmt =
-                    $conn->prepare($sql);
+                    SET
+                        faculty_code = ?,
+                        faculty_name = ?,
+                        email = ?,
+                        phone = ?,
+                        designation = ?,
+                        is_hod = ?
+                    WHERE faculty_id = ?
+                ");
 
                 if (!$stmt) {
-
-                    throw new Exception(
-                        "Failed to update previous HOD."
+                    throw new RuntimeException(
+                        "Unable to prepare faculty update."
                     );
                 }
 
-
                 $stmt->bind_param(
-                    "i",
+                    "sssssii",
+                    $faculty_code,
+                    $faculty_name,
+                    $email,
+                    $phone,
+                    $designation,
+                    $is_hod,
                     $faculty_id
                 );
 
-
                 if (!$stmt->execute()) {
-
-                    $stmt->close();
-
-                    throw new Exception(
-                        "Failed to update previous HOD."
+                    throw new RuntimeException(
+                        "Failed to update faculty."
                     );
                 }
 
-
                 $stmt->close();
 
+                /* UPDATE LOGIN ROLE */
 
-                /*
-                | Demote previous HOD in users table
-                */
+                $role = $is_hod === 1 ? "HOD" : "FACULTY";
 
-                $sql = "
-                    UPDATE users u
-
-                    INNER JOIN faculty f
-                        ON u.user_id = f.user_id
-
-                    SET u.role = 'FACULTY'
-
-                    WHERE f.faculty_id != ?
-                    AND f.is_hod = 0
-                    AND u.role = 'HOD'
-                ";
-
-                $stmt =
-                    $conn->prepare($sql);
+                $stmt = $conn->prepare("
+                    UPDATE users
+                    SET role = ?
+                    WHERE user_id = ?
+                ");
 
                 if (!$stmt) {
-
-                    throw new Exception(
-                        "Failed to update previous HOD account."
+                    throw new RuntimeException(
+                        "Unable to prepare user role update."
                     );
                 }
-
 
                 $stmt->bind_param(
-                    "i",
-                    $faculty_id
+                    "si",
+                    $role,
+                    $user_id
                 );
 
-
                 if (!$stmt->execute()) {
-
-                    $stmt->close();
-
-                    throw new Exception(
-                        "Failed to update previous HOD account."
+                    throw new RuntimeException(
+                        "Failed to update user role."
                     );
                 }
 
-
-                $stmt->close();
-            }
-
-
-            /*
-            |--------------------------------------------------------------------------
-            | Update Faculty Table
-            |--------------------------------------------------------------------------
-            */
-
-            $sql = "
-                UPDATE faculty
-
-                SET
-                    faculty_code = ?,
-                    faculty_name = ?,
-                    email = ?,
-                    phone = ?,
-                    designation = ?,
-                    is_hod = ?
-
-                WHERE faculty_id = ?
-            ";
-
-            $stmt =
-                $conn->prepare($sql);
-
-            if (!$stmt) {
-
-                throw new Exception(
-                    "Failed to update faculty."
-                );
-            }
-
-
-            $stmt->bind_param(
-                "sssssii",
-                $faculty_code,
-                $faculty_name,
-                $email,
-                $phone,
-                $designation,
-                $is_hod,
-                $faculty_id
-            );
-
-
-            if (!$stmt->execute()) {
-
                 $stmt->close();
 
-                throw new Exception(
-                    "Failed to update faculty."
-                );
-            }
+                /* OPTIONAL PASSWORD UPDATE */
 
+                if ($new_password !== "") {
 
-            $stmt->close();
-
-
-            /*
-            |--------------------------------------------------------------------------
-            | Update User Role
-            |--------------------------------------------------------------------------
-            */
-
-            $role =
-                ($is_hod === 1)
-                ? "HOD"
-                : "FACULTY";
-
-
-            $sql = "
-                UPDATE users
-
-                SET role = ?
-
-                WHERE user_id = ?
-            ";
-
-            $stmt =
-                $conn->prepare($sql);
-
-            if (!$stmt) {
-
-                throw new Exception(
-                    "Failed to update user role."
-                );
-            }
-
-
-            $stmt->bind_param(
-                "si",
-                $role,
-                $user_id
-            );
-
-
-            if (!$stmt->execute()) {
-
-                $stmt->close();
-
-                throw new Exception(
-                    "Failed to update user role."
-                );
-            }
-
-
-            $stmt->close();
-
-
-            /*
-            |--------------------------------------------------------------------------
-            | Update Password
-            |--------------------------------------------------------------------------
-            */
-
-            if ($new_password !== "") {
-
-                $hashedPassword =
-                    password_hash(
+                    $hashedPassword = password_hash(
                         $new_password,
                         PASSWORD_DEFAULT
                     );
 
+                    $stmt = $conn->prepare("
+                        UPDATE users
+                        SET password = ?
+                        WHERE user_id = ?
+                    ");
 
-                $sql = "
-                    UPDATE users
+                    if (!$stmt) {
+                        throw new RuntimeException(
+                            "Unable to prepare password update."
+                        );
+                    }
 
-                    SET password = ?
-
-                    WHERE user_id = ?
-                ";
-
-                $stmt =
-                    $conn->prepare($sql);
-
-                if (!$stmt) {
-
-                    throw new Exception(
-                        "Failed to update password."
+                    $stmt->bind_param(
+                        "si",
+                        $hashedPassword,
+                        $user_id
                     );
-                }
 
-
-                $stmt->bind_param(
-                    "si",
-                    $hashedPassword,
-                    $user_id
-                );
-
-
-                if (!$stmt->execute()) {
+                    if (!$stmt->execute()) {
+                        throw new RuntimeException(
+                            "Failed to update password."
+                        );
+                    }
 
                     $stmt->close();
-
-                    throw new Exception(
-                        "Failed to update password."
-                    );
                 }
 
+                $conn->commit();
 
-                $stmt->close();
+                $_SESSION["faculty_edit_csrf"] =
+                    bin2hex(random_bytes(32));
+
+                header(
+                    "Location: faculty.php?success=updated"
+                );
+                exit;
+
+            } catch (Throwable $e) {
+                $conn->rollback();
+                throw $e;
             }
 
-
-            /*
-            |--------------------------------------------------------------------------
-            | Commit
-            |--------------------------------------------------------------------------
-            */
-
-            $conn->commit();
-
-
-            header(
-                "Location: faculty.php?success=updated"
-            );
-
-            exit;
-
         } catch (Throwable $e) {
-
-            $conn->rollback();
-
-            $error =
-                $e->getMessage();
+            $error = $e->getMessage();
         }
     }
 }
@@ -545,278 +387,424 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 ?>
 
 <?php require_once "../includes/header.php"; ?>
-
 <?php require_once "../includes/navbar.php"; ?>
-
 <?php require_once "../includes/sidebar.php"; ?>
 
+<style>
+/* HOD EDIT FACULTY - PAGE SPECIFIC */
 
-<main>
+main.fe-page {
+    min-height: 100vh;
+    color: #edf1fb;
+    box-sizing: border-box;
+}
 
-    <div class="page-header">
+.fe-page *,
+.fe-page *::before,
+.fe-page *::after {
+    box-sizing: border-box;
+}
 
-        <div>
+.fe-page .fe-wrap {
+    width: 100%;
+    max-width: 1050px;
+    margin: 0 auto;
+}
 
-            <h1>
-                Edit Faculty
-            </h1>
+.fe-page .fe-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 18px;
+    padding: 28px 32px;
+    margin-bottom: 25px;
+    border: 1px solid #51478c;
+    border-radius: 18px;
+    background: linear-gradient(
+        115deg,
+        #28244e,
+        #39316e 60%,
+        #574898
+    );
+}
 
-            <p>
-                Update faculty details and account settings.
-            </p>
+.fe-page .fe-header h1 {
+    margin: 0 0 8px;
+    color: #fff;
+    font-size: 30px;
+    font-weight: 800;
+}
+
+.fe-page .fe-header p {
+    margin: 0;
+    color: #ddd5f6;
+    font-size: 13px;
+    line-height: 1.6;
+}
+
+.fe-page .fe-back {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 44px;
+    padding: 11px 20px;
+    border: 1px solid #9183bd;
+    border-radius: 10px;
+    background: rgba(255,255,255,.09);
+    color: #fff;
+    text-decoration: none;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.fe-page .fe-back:hover {
+    background: rgba(255,255,255,.18);
+}
+
+.fe-page .fe-card {
+    padding: 34px;
+    border: 1px solid #2d3a50;
+    border-radius: 18px;
+    background: #172235;
+    box-shadow: 0 15px 35px rgba(0,0,0,.16);
+}
+
+.fe-page .fe-grid {
+    display: grid;
+    grid-template-columns: repeat(2,minmax(0,1fr));
+    gap: 23px 24px;
+}
+
+.fe-page .fe-field {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    gap: 10px;
+}
+
+.fe-page .fe-field label {
+    color: #dce5f4;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.fe-page .fe-field input:not([type="checkbox"]) {
+    display: block;
+    width: 100%;
+    min-width: 0;
+    min-height: 50px;
+    padding: 11px 15px;
+    border: 1px solid #3a4962;
+    border-radius: 10px;
+    outline: none;
+    background: #10192a;
+    color: #f4f6ff;
+    font-family: inherit;
+    font-size: 14px;
+}
+
+.fe-page .fe-field input:focus {
+    border-color: #af9bff;
+    box-shadow: 0 0 0 3px rgba(175,155,255,.14);
+}
+
+.fe-page .fe-field input:disabled {
+    background: #253149;
+    color: #afbdd1;
+    cursor: not-allowed;
+}
+
+.fe-page .fe-field small {
+    color: #a8b6ce;
+    font-size: 12px;
+    line-height: 1.6;
+}
+
+.fe-page .fe-hod {
+    grid-column: 1 / -1;
+    padding: 20px;
+    border: 1px solid #4d4478;
+    border-radius: 12px;
+    background: #211f3a;
+}
+
+.fe-page .fe-check-label {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    color: #fff;
+    font-size: 14px;
+    font-weight: 750;
+    cursor: pointer;
+}
+
+.fe-page .fe-check-label input {
+    width: 19px;
+    height: 19px;
+    accent-color: #aa94ff;
+}
+
+.fe-page .fe-hod small {
+    display: block;
+    margin-top: 10px;
+}
+
+.fe-page .fe-actions {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+    padding-top: 8px;
+}
+
+.fe-page .fe-submit,
+.fe-page .fe-cancel {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 46px;
+    padding: 12px 23px;
+    border-radius: 10px;
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 800;
+    text-decoration: none;
+    cursor: pointer;
+}
+
+.fe-page .fe-submit {
+    border: none;
+    background: linear-gradient(115deg,#b8a6ff,#947cfa);
+    color: #191330;
+}
+
+.fe-page .fe-submit:hover {
+    filter: brightness(1.1);
+}
+
+.fe-page .fe-cancel {
+    border: 1px solid #4b5a74;
+    background: #28364e;
+    color: #e1e9f7;
+}
+
+.fe-page .fe-cancel:hover {
+    background: #34445f;
+}
+
+.fe-page .fe-error {
+    margin-bottom: 20px;
+    padding: 15px 18px;
+    border: 1px solid #915067;
+    border-radius: 11px;
+    background: #482a38;
+    color: #ffd1da;
+    font-size: 13px;
+}
+
+@media (max-width: 760px) {
+    .fe-page .fe-header {
+        padding: 24px 20px;
+    }
+
+    .fe-page .fe-header h1 {
+        font-size: 25px;
+    }
+
+    .fe-page .fe-card {
+        padding: 23px 19px;
+    }
+
+    .fe-page .fe-grid {
+        grid-template-columns: 1fr;
+        gap: 20px;
+    }
+
+    .fe-page .fe-hod,
+    .fe-page .fe-actions {
+        grid-column: 1;
+    }
+}
+</style>
+
+<main class="fe-page">
+
+    <div class="fe-wrap">
+
+        <div class="fe-header">
+
+            <div>
+                <h1>Edit Faculty</h1>
+                <p>
+                    Update faculty details and account settings.
+                </p>
+            </div>
+
+            <a href="faculty.php" class="fe-back">
+                ← Back to Faculty
+            </a>
 
         </div>
 
+        <?php if ($error !== ""): ?>
+            <div class="fe-error" role="alert">
+                <?= facultyEditEscape($error) ?>
+            </div>
+        <?php endif; ?>
 
-        <a
-            href="faculty.php"
-            class="btn btn-secondary"
-        >
-            Back to Faculty
-        </a>
+        <div class="fe-card">
 
-    </div>
-
-
-    <?php if ($error !== ""): ?>
-
-        <div class="alert alert-error">
-
-            <?php
-            echo htmlspecialchars($error);
-            ?>
-
-        </div>
-
-    <?php endif; ?>
-
-
-    <div class="form-container">
-
-        <form
-            method="POST"
-            action=""
-        >
-
-            <!-- Faculty Code -->
-
-            <div class="form-group">
-
-                <label for="faculty_code">
-                    Faculty Code
-                </label>
+            <form method="POST" class="fe-grid">
 
                 <input
-                    type="text"
-                    id="faculty_code"
-                    name="faculty_code"
-                    value="<?php
-                        echo htmlspecialchars(
-                            $faculty_code
-                        );
-                    ?>"
-                    maxlength="20"
-                    required
+                    type="hidden"
+                    name="csrf_token"
+                    value="<?= facultyEditEscape(
+                        $_SESSION["faculty_edit_csrf"]
+                    ) ?>"
                 >
 
-            </div>
-
-
-            <!-- Faculty Name -->
-
-            <div class="form-group">
-
-                <label for="faculty_name">
-                    Faculty Name
-                </label>
-
-                <input
-                    type="text"
-                    id="faculty_name"
-                    name="faculty_name"
-                    value="<?php
-                        echo htmlspecialchars(
-                            $faculty_name
-                        );
-                    ?>"
-                    maxlength="100"
-                    required
-                >
-
-            </div>
-
-
-            <!-- Username -->
-
-            <div class="form-group">
-
-                <label>
-                    Username
-                </label>
-
-                <input
-                    type="text"
-                    value="<?php
-                        echo htmlspecialchars(
-                            $username
-                        );
-                    ?>"
-                    disabled
-                >
-
-                <small>
-                    Username cannot be changed here.
-                </small>
-
-            </div>
-
-
-            <!-- Email -->
-
-            <div class="form-group">
-
-                <label for="email">
-                    Email
-                </label>
-
-                <input
-                    type="email"
-                    id="email"
-                    name="email"
-                    value="<?php
-                        echo htmlspecialchars(
-                            $email
-                        );
-                    ?>"
-                    maxlength="100"
-                >
-
-            </div>
-
-
-            <!-- Phone -->
-
-            <div class="form-group">
-
-                <label for="phone">
-                    Phone
-                </label>
-
-                <input
-                    type="text"
-                    id="phone"
-                    name="phone"
-                    value="<?php
-                        echo htmlspecialchars(
-                            $phone
-                        );
-                    ?>"
-                    maxlength="20"
-                >
-
-            </div>
-
-
-            <!-- Designation -->
-
-            <div class="form-group">
-
-                <label for="designation">
-                    Designation
-                </label>
-
-                <input
-                    type="text"
-                    id="designation"
-                    name="designation"
-                    value="<?php
-                        echo htmlspecialchars(
-                            $designation
-                        );
-                    ?>"
-                    maxlength="50"
-                    required
-                >
-
-            </div>
-
-
-            <!-- Password -->
-
-            <div class="form-group">
-
-                <label for="password">
-                    New Password
-                </label>
-
-                <input
-                    type="password"
-                    id="password"
-                    name="password"
-                    minlength="6"
-                >
-
-                <small>
-                    Leave blank to keep the current password.
-                </small>
-
-            </div>
-
-
-            <!-- HOD -->
-
-            <div class="form-group">
-
-                <label>
-
+                <div class="fe-field">
+                    <label for="faculty_code">
+                        Faculty Code
+                    </label>
                     <input
-                        type="checkbox"
-                        name="is_hod"
-                        value="1"
-                        <?php
-                        if ($is_hod === 1) {
-                            echo "checked";
-                        }
-                        ?>
+                        type="text"
+                        id="faculty_code"
+                        name="faculty_code"
+                        maxlength="20"
+                        value="<?= facultyEditEscape($faculty_code) ?>"
+                        required
                     >
+                </div>
 
-                    Is HOD
+                <div class="fe-field">
+                    <label for="faculty_name">
+                        Faculty Name
+                    </label>
+                    <input
+                        type="text"
+                        id="faculty_name"
+                        name="faculty_name"
+                        maxlength="100"
+                        value="<?= facultyEditEscape($faculty_name) ?>"
+                        required
+                    >
+                </div>
 
-                </label>
+                <div class="fe-field">
+                    <label for="username">
+                        Username
+                    </label>
+                    <input
+                        type="text"
+                        id="username"
+                        value="<?= facultyEditEscape($username) ?>"
+                        disabled
+                    >
+                    <small>
+                        Username cannot be changed here.
+                    </small>
+                </div>
 
-                <small>
-                    Selecting HOD will make the current HOD a Faculty member.
-                </small>
+                <div class="fe-field">
+                    <label for="email">
+                        Email Address
+                    </label>
+                    <input
+                        type="email"
+                        id="email"
+                        name="email"
+                        maxlength="100"
+                        value="<?= facultyEditEscape($email) ?>"
+                    >
+                </div>
 
-            </div>
+                <div class="fe-field">
+                    <label for="phone">
+                        Phone Number
+                    </label>
+                    <input
+                        type="text"
+                        id="phone"
+                        name="phone"
+                        maxlength="20"
+                        value="<?= facultyEditEscape($phone) ?>"
+                    >
+                </div>
 
+                <div class="fe-field">
+                    <label for="designation">
+                        Designation
+                    </label>
+                    <input
+                        type="text"
+                        id="designation"
+                        name="designation"
+                        maxlength="50"
+                        value="<?= facultyEditEscape($designation) ?>"
+                        required
+                    >
+                </div>
 
-            <!-- Buttons -->
+                <div class="fe-field">
+                    <label for="password">
+                        New Password
+                    </label>
+                    <input
+                        type="password"
+                        id="password"
+                        name="password"
+                        minlength="6"
+                        autocomplete="new-password"
+                        placeholder="Leave blank to keep password"
+                    >
+                    <small>
+                        Enter a password only if you want to change it.
+                    </small>
+                </div>
 
-            <div class="form-actions">
+                <div class="fe-hod">
+                    <label class="fe-check-label">
+                        <input
+                            type="checkbox"
+                            name="is_hod"
+                            value="1"
+                            <?= $is_hod === 1 ? "checked" : "" ?>
+                        >
+                        Assign HOD Role
+                    </label>
+                    <small>
+                        Enabling this makes the selected faculty
+                        member the HOD and demotes the previous HOD.
+                        Use carefully.
+                    </small>
+                </div>
 
-                <button
-                    type="submit"
-                    class="btn btn-primary"
-                >
-                    Update Faculty
-                </button>
+                <div class="fe-actions">
+                    <button
+                        type="submit"
+                        class="fe-submit"
+                    >
+                        Update Faculty
+                    </button>
 
+                    <a
+                        href="faculty.php"
+                        class="fe-cancel"
+                    >
+                        Cancel
+                    </a>
+                </div>
 
-                <a
-                    href="faculty.php"
-                    class="btn btn-secondary"
-                >
-                    Cancel
-                </a>
+            </form>
 
-            </div>
-
-        </form>
+        </div>
 
     </div>
 
 </main>
-
 
 <?php require_once "../includes/footer.php"; ?>

@@ -1108,7 +1108,275 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 <?php require_once "../includes/sidebar.php"; ?>
 
 
-<main>
+<style>
+/* ==========================================
+   PREMIUM DARK HOD TIMETABLE FORMS
+   Page-specific styling
+   ========================================== */
+
+main.tt-dark-page {
+    color: #edf1fb;
+    min-height: 100vh;
+    box-sizing: border-box;
+}
+
+.tt-dark-page *,
+.tt-dark-page *::before,
+.tt-dark-page *::after {
+    box-sizing: border-box;
+}
+
+/* PAGE HEADER */
+
+.tt-dark-page .page-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 20px;
+
+    padding: 28px 32px;
+    margin-bottom: 25px;
+
+    border: 1px solid #51478c;
+    border-radius: 18px;
+
+    background: linear-gradient(
+        115deg,
+        #28244e,
+        #39316e 60%,
+        #574898
+    );
+}
+
+.tt-dark-page .page-header h1 {
+    color: #ffffff;
+    font-size: 30px;
+    font-weight: 800;
+    margin: 0 0 9px;
+}
+
+.tt-dark-page .page-header p {
+    color: #ddd5f6;
+    font-size: 13px;
+    margin: 0;
+    line-height: 1.6;
+}
+
+/* BACK BUTTON */
+
+.tt-dark-page .page-header .btn-secondary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+
+    min-height: 44px;
+    padding: 11px 20px;
+
+    border: 1px solid #9183bd;
+    border-radius: 10px;
+
+    background: rgba(255,255,255,0.09);
+    color: #ffffff;
+
+    font-size: 13px;
+    font-weight: 750;
+    text-decoration: none;
+}
+
+.tt-dark-page .page-header .btn-secondary:hover {
+    background: rgba(255,255,255,0.18);
+}
+
+/* FORM CARD */
+
+.tt-dark-page .form-card {
+    width: 100%;
+    max-width: 1050px;
+
+    padding: 34px;
+
+    border: 1px solid #2d3a50;
+    border-radius: 18px;
+
+    background: #172235;
+
+    box-shadow: 0 15px 35px rgba(0,0,0,0.16);
+}
+
+/* TWO-COLUMN GRID */
+
+.tt-dark-page .form-card form {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 24px;
+}
+
+/* FIELDS */
+
+.tt-dark-page .form-card .form-group {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    margin: 0;
+}
+
+.tt-dark-page .form-card .form-group label {
+    display: block;
+    margin-bottom: 10px;
+
+    color: #dce5f4;
+
+    font-size: 13px;
+    font-weight: 700;
+}
+
+/* DROPDOWNS AND INPUTS */
+
+.tt-dark-page .form-card select,
+.tt-dark-page .form-card input,
+.tt-dark-page .form-card textarea {
+    display: block;
+
+    width: 100%;
+    min-width: 0;
+    min-height: 50px;
+
+    padding: 11px 15px;
+
+    border: 1px solid #3a4962;
+    border-radius: 10px;
+
+    background: #10192a;
+    color: #f4f6ff;
+
+    font-family: inherit;
+    font-size: 14px;
+
+    outline: none;
+
+    transition:
+        border-color 0.2s ease,
+        box-shadow 0.2s ease;
+}
+
+.tt-dark-page .form-card select:focus,
+.tt-dark-page .form-card input:focus,
+.tt-dark-page .form-card textarea:focus {
+    border-color: #af9bff;
+    box-shadow: 0 0 0 3px rgba(175,155,255,0.14);
+}
+
+.tt-dark-page .form-card select option {
+    background: #10192a;
+    color: #ffffff;
+}
+
+/* HELPER TEXT */
+
+.tt-dark-page .form-card small {
+    display: block;
+    margin-top: 9px;
+
+    color: #a8b6ce;
+
+    font-size: 12px;
+    line-height: 1.6;
+}
+
+/* BUTTON AREA */
+
+.tt-dark-page .form-card form > button,
+.tt-dark-page .form-card form > a {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+
+    min-height: 46px;
+    padding: 12px 23px;
+
+    border-radius: 10px;
+
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 800;
+    text-decoration: none;
+
+    cursor: pointer;
+}
+
+/* SAVE / UPDATE */
+
+.tt-dark-page .form-card .btn-primary {
+    border: none;
+
+    background: linear-gradient(
+        115deg,
+        #b8a6ff,
+        #947cfa
+    );
+
+    color: #191330;
+}
+
+.tt-dark-page .form-card .btn-primary:hover {
+    filter: brightness(1.1);
+}
+
+/* CANCEL */
+
+.tt-dark-page .form-card .btn-secondary {
+    border: 1px solid #4b5a74;
+    background: #28364e;
+    color: #e1e9f7;
+}
+
+.tt-dark-page .form-card .btn-secondary:hover {
+    background: #34445f;
+}
+
+/* VALIDATION ERROR */
+
+.tt-dark-page .alert-error {
+    max-width: 1050px;
+    margin-bottom: 22px;
+    padding: 15px 18px;
+
+    border: 1px solid #915067;
+    border-radius: 11px;
+
+    background: #482a38;
+    color: #ffd1da;
+
+    font-size: 13px;
+    line-height: 1.7;
+}
+
+/* RESPONSIVE */
+
+@media (max-width: 760px) {
+
+    .tt-dark-page .page-header {
+        flex-direction: column;
+        align-items: flex-start;
+        padding: 24px 20px;
+    }
+
+    .tt-dark-page .page-header h1 {
+        font-size: 25px;
+    }
+
+    .tt-dark-page .form-card {
+        padding: 23px 19px;
+    }
+
+    .tt-dark-page .form-card form {
+        grid-template-columns: 1fr;
+        gap: 19px;
+    }
+}
+</style>
+<main class="tt-dark-page">
 
     <div class="page-header">
 

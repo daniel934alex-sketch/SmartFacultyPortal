@@ -11,23 +11,14 @@ requireRole('FACULTY');
 <html lang="en">
 
 <head>
-
     <meta charset="UTF-8">
-
-    <meta
-        name="viewport"
-        content="width=device-width, initial-scale=1.0"
-    >
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
     <title>Faculty Dashboard</title>
 
-    <link
-        rel="stylesheet"
-        href="../assets/css/style.css"
-    >
+    <link rel="stylesheet" href="../assets/css/style.css">
 
     <style>
-
         body {
             font-family: Arial, sans-serif;
             background: #f4f6f9;
@@ -96,15 +87,11 @@ requireRole('FACULTY');
         }
 
         @media (max-width: 600px) {
-
             .menu {
                 grid-template-columns: 1fr;
             }
-
         }
-
     </style>
-
 </head>
 
 <body>
@@ -112,7 +99,6 @@ requireRole('FACULTY');
 <div class="dashboard">
 
     <div class="welcome">
-
         <h1>Faculty Dashboard</h1>
 
         <h2>
@@ -120,67 +106,50 @@ requireRole('FACULTY');
             <?= htmlspecialchars($_SESSION['username']) ?>
         </h2>
 
-        <p>
-            Smart Faculty Assistant Portal
-        </p>
-
-        <p>
-            Faculty login successful.
-        </p>
-
+        <p>Smart Faculty Assistant Portal</p>
+        <p>Faculty login successful.</p>
     </div>
-
 
     <div class="menu">
 
         <!-- Timetable -->
-
         <a href="timetable.php">
             📅 My Timetable
         </a>
 
-
         <!-- Notifications -->
-
         <a href="notifications.php">
             🔔 Notifications
         </a>
 
-
         <!-- Profile -->
-
         <a href="profile.php">
             👤 My Profile
         </a>
 
+        <!-- Attendance Marking -->
+        <a href="attendance.php">
+            📝 Mark Attendance
+        </a>
 
-        <!-- Availability -->
-
+        <!-- Faculty Availability -->
         <a href="availability.php">
             📢 Faculty Availability
         </a>
 
-
         <!-- Handover Requests -->
-
         <a href="requests.php">
             🔄 Handover Requests
         </a>
 
     </div>
 
-
     <!-- Logout -->
-
-    <a
-        class="logout"
-        href="../auth/logout.php"
-    >
+    <a class="logout" href="../auth/logout.php">
         🚪 Logout
     </a>
 
 </div>
 
 </body>
-
 </html>

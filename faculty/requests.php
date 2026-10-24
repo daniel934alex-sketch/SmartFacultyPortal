@@ -122,6 +122,11 @@ foreach ($requests as $request) {
    Scoped to requests.php only
    ====================================== */
 
+html {
+    scrollbar-gutter: stable;
+    overflow-y: scroll;
+}
+
 body.hr-page {
     --hr-bg: #0c1220;
     --hr-sidebar: #111a2b;
@@ -171,6 +176,10 @@ body.hr-page {
     position: sticky;
     top: 0;
     flex: 0 0 264px;
+    width: 264px;
+    min-width: 264px;
+    max-width: 264px;
+    box-sizing: border-box;
     display: flex;
     flex-direction: column;
     height: 100vh;
@@ -389,6 +398,7 @@ body.hr-page {
     width: min(1230px, 100%);
     margin: 0 auto;
     padding: 34px;
+    box-sizing: border-box;
 }
 
 /* HERO */
@@ -792,7 +802,10 @@ body.hr-page {
 
 @media (max-width: 1100px) {
     .hr-page .hr-sidebar {
-        flex-basis: 235px;
+        flex: 0 0 235px;
+        width: 235px;
+        min-width: 235px;
+        max-width: 235px;
     }
 
     .hr-page .hr-main {
@@ -814,6 +827,9 @@ body.hr-page {
         top: 0;
         left: 0;
         width: 270px;
+        min-width: 270px;
+        max-width: 270px;
+        flex: none;
         height: 100dvh;
         transform: translateX(-100%);
         transition: transform .25s ease;

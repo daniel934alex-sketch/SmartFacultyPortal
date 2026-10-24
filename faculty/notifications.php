@@ -69,6 +69,11 @@ $initial = strtoupper(substr($username, 0, 1));
     <style>
         /* NOTIFICATIONS PAGE ONLY */
 
+        html {
+            scrollbar-gutter: stable;
+            overflow-y: scroll;
+        }
+
         body.fn-page {
             --fn-bg: #0c1220;
             --fn-sidebar: #111a2b;
@@ -119,6 +124,10 @@ $initial = strtoupper(substr($username, 0, 1));
             position: sticky;
             top: 0;
             flex: 0 0 264px;
+            width: 264px;
+            min-width: 264px;
+            max-width: 264px;
+            box-sizing: border-box;
             display: flex;
             flex-direction: column;
             height: 100vh;
@@ -689,9 +698,12 @@ $initial = strtoupper(substr($username, 0, 1));
 
         /* TABLET */
 
-        @media (max-width: 1000px) {
+        @media (max-width: 1100px) {
             .fn-page .fn-sidebar {
-                flex-basis: 235px;
+                flex: 0 0 235px;
+                width: 235px;
+                min-width: 235px;
+                max-width: 235px;
             }
 
             .fn-page .fn-main {
@@ -707,6 +719,9 @@ $initial = strtoupper(substr($username, 0, 1));
                 top: 0;
                 left: 0;
                 width: 270px;
+                min-width: 270px;
+                max-width: 270px;
+                flex: none;
                 height: 100dvh;
                 transform: translateX(-100%);
                 transition: transform .25s ease;

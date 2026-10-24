@@ -5,95 +5,248 @@ requireRole('FACULTY');
 
 require_once "../config/database.php";
 
-$user_id = $_SESSION['user_id'];
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
 
-$faculty_sql = "
-    SELECT faculty_id
-    FROM faculty
-    WHERE user_id = ?
+$userId = (int) $_SESSION['user_id'];
+
+/* =========================================================
+   1. GET AUTHENTICATED FACULTY INFORMATION
+========================================================= */
+$facultySql = "
+    SELECT
+        f.faculty_id,
+        f.faculty_code,
+        f.faculty_name,
+        f.designation,
+        f.is_hod,
+        f.department_id,
+        d.department_name,
+        d.department_code
+    FROM faculty f
+    LEFT JOIN departments d ON d.department_id = f.department_id
+    WHERE f.user_id = ?
     LIMIT 1
 ";
 
-$faculty_stmt = $conn->prepare($faculty_sql);
-$faculty_stmt->bind_param("i", $user_id);
-$faculty_stmt->execute();
+$facultyStmt = $conn->prepare($facultySql);
+$faculty = [];
+if ($facultyStmt) {
+    $facultyStmt->bind_param("i", $userId);
+    $facultyStmt->execute();
+    $facultyResult = $facultyStmt->get_result();
+    $faculty = $facultyResult->fetch_assoc() ?? [];
+    $facultyStmt->close();
+}
 
-$faculty_result = $faculty_stmt->get_result();
-
-if ($faculty_result->num_rows === 0) {
+if (empty($faculty)) {
     die("Faculty record not found.");
 }
 
-$faculty = $faculty_result->fetch_assoc();
-$faculty_id = $faculty['faculty_id'];
-$faculty_stmt->close();
+$facultyId   = (int) $faculty['faculty_id'];
+$facultyName = $faculty['faculty_name'] ?? 'Faculty Member';
+$facultyCode = $faculty['faculty_code'] ?? 'CSE002';
+$designation = $faculty['designation'] ?? 'Assistant Professor';
+$deptName    = !empty($faculty['department_name'])
+    ? $faculty['department_name']
+    : 'Computer Science and Engineering';
 
-$sql = "
-    SELECT
-        t.day,
-        t.period_id,
-        t.subject_id,
-        t.faculty_id,
-        s.subject_name,
-        t.status
-    FROM timetable t
-    LEFT JOIN subjects s
-        ON t.subject_id = s.subject_id
-    WHERE t.faculty_id = ?
-";
+/* =========================================================
+   2. GET ALL PERIODS FROM DATABASE
+========================================================= */
+$periods = [];
+$periodRes = $conn->query("SELECT period_id, period_number, start_time, end_time FROM periods ORDER BY period_number ASC");
 
-$stmt = $conn->prepare($sql);
-$stmt->bind_param("i", $faculty_id);
-$stmt->execute();
-
-$result = $stmt->get_result();
-
-$timetable = [];
-
-while ($row = $result->fetch_assoc()) {
-    $day = strtoupper($row['day']);
-    $period = (int)$row['period_id'];
-    $timetable[$day][$period] = $row['subject_name'] ?? "Class";
+if ($periodRes) {
+    while ($pRow = $periodRes->fetch_assoc()) {
+        $num = (int) $pRow['period_number'];
+        $sTime = date('H:i', strtotime($pRow['start_time']));
+        $eTime = date('H:i', strtotime($pRow['end_time']));
+        $periods[$num] = [
+            'period_id'     => (int) $pRow['period_id'],
+            'period_number' => $num,
+            'start_time'    => $sTime,
+            'end_time'      => $eTime,
+            'formatted'     => $sTime . ' - ' . $eTime
+        ];
+    }
 }
 
-$stmt->close();
-
-$days = [
-    "MONDAY",
-    "TUESDAY",
-    "WEDNESDAY",
-    "THURSDAY",
-    "FRIDAY",
-    "SATURDAY"
+// Fallback timings for periods 1-9 if any are missing
+$defaultTimings = [
+    1 => '08:30 - 09:15',
+    2 => '09:15 - 10:00',
+    3 => '10:00 - 10:45',
+    4 => '11:00 - 11:45',
+    5 => '11:45 - 12:30',
+    6 => '12:30 - 13:15',
+    7 => '14:00 - 14:45',
+    8 => '14:45 - 15:30',
+    9 => '15:45 - 16:30'
 ];
 
+for ($i = 1; $i <= 9; $i++) {
+    if (!isset($periods[$i])) {
+        $parts = explode(' - ', $defaultTimings[$i]);
+        $periods[$i] = [
+            'period_id'     => $i,
+            'period_number' => $i,
+            'start_time'    => $parts[0],
+            'end_time'      => $parts[1],
+            'formatted'     => $defaultTimings[$i]
+        ];
+    }
+}
+
+/* =========================================================
+   3. GET PUBLISHED TIMETABLE ENTRIES FOR THIS FACULTY ONLY
+========================================================= */
+$days = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'];
+$grid = [];
+foreach ($days as $d) {
+    $grid[$d] = [];
+}
+
+$ttSql = "
+    SELECT
+        t.timetable_id,
+        t.day,
+        t.status,
+        p.period_number,
+        p.start_time,
+        p.end_time,
+        sec.section_id,
+        sec.section_name,
+        ac.year_number,
+        ac.semester_number,
+        ac.academic_year,
+        s.subject_id,
+        s.subject_code,
+        s.subject_name,
+        s.subject_type,
+        c.classroom_id,
+        c.room_number,
+        c.room_type
+    FROM timetable t
+    INNER JOIN periods p ON p.period_id = t.period_id
+    INNER JOIN sections sec ON sec.section_id = t.section_id
+    INNER JOIN academic_classes ac ON ac.class_id = sec.class_id
+    INNER JOIN subjects s ON s.subject_id = t.subject_id
+    INNER JOIN classrooms c ON c.classroom_id = t.classroom_id
+    WHERE t.faculty_id = ?
+      AND t.status = 'PUBLISHED'
+    ORDER BY
+        FIELD(UPPER(t.day), 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'),
+        p.period_number
+";
+
+$timetableRows     = [];
+$classroomsList    = [];
+$academicYearsList = [];
+$yearSemSecList    = [];
+$subjectSummary    = [];
+
+$ttStmt = $conn->prepare($ttSql);
+if ($ttStmt) {
+    $ttStmt->bind_param("i", $facultyId);
+    if ($ttStmt->execute()) {
+        $ttRes = $ttStmt->get_result();
+        while ($row = $ttRes->fetch_assoc()) {
+            $timetableRows[] = $row;
+            $day  = strtoupper($row['day']);
+            $pNum = (int) $row['period_number'];
+
+            if (isset($grid[$day])) {
+                $grid[$day][$pNum] = $row;
+            }
+
+            if (!empty($row['room_number']) && !in_array($row['room_number'], $classroomsList)) {
+                $classroomsList[] = $row['room_number'];
+            }
+            if (!empty($row['academic_year']) && !in_array($row['academic_year'], $academicYearsList)) {
+                $academicYearsList[] = $row['academic_year'];
+            }
+
+            // Format Year / Semester / Section
+            $romanYears = [1 => 'I', 2 => 'II', 3 => 'III', 4 => 'IV'];
+            $romanSem   = [1 => 'I', 2 => 'II', 3 => 'III', 4 => 'IV', 5 => 'V', 6 => 'VI', 7 => 'VII', 8 => 'VIII'];
+            $yStr = isset($romanYears[$row['year_number']]) ? $romanYears[$row['year_number']] . ' Year' : 'Year ' . $row['year_number'];
+            $sStr = isset($romanSem[$row['semester_number']]) ? $romanSem[$row['semester_number']] . ' Sem' : 'Sem ' . $row['semester_number'];
+            $combo = $yStr . ' / ' . $sStr . ' / ' . $row['section_name'];
+            if (!in_array($combo, $yearSemSecList)) {
+                $yearSemSecList[] = $combo;
+            }
+
+            // Course allocation & workload aggregation
+            $sCode = $row['subject_code'];
+            if (!isset($subjectSummary[$sCode])) {
+                $subjectSummary[$sCode] = [
+                    'code'     => $row['subject_code'],
+                    'name'     => $row['subject_name'],
+                    'type'     => $row['subject_type'],
+                    'sections' => [],
+                    'rooms'    => [],
+                    'hours'    => 0
+                ];
+            }
+            $subjectSummary[$sCode]['hours']++;
+            if (!in_array($row['section_name'], $subjectSummary[$sCode]['sections'])) {
+                $subjectSummary[$sCode]['sections'][] = $row['section_name'];
+            }
+            if (!in_array($row['room_number'], $subjectSummary[$sCode]['rooms'])) {
+                $subjectSummary[$sCode]['rooms'][] = $row['room_number'];
+            }
+        }
+    }
+    $ttStmt->close();
+}
+
+// Fallback academic metadata if none assigned yet
+if (empty($academicYearsList)) {
+    $fbRes = $conn->query("SELECT academic_year, semester_number, year_number FROM academic_classes ORDER BY class_id DESC LIMIT 1");
+    if ($fbRes && $fbRow = $fbRes->fetch_assoc()) {
+        $academicYearsList[] = $fbRow['academic_year'];
+    } else {
+        $academicYearsList[] = '2026-2027';
+    }
+}
+
+$academicYearDisplay = !empty($academicYearsList) ? implode(', ', $academicYearsList) : '2026-2027';
+$yearSemSecDisplay   = !empty($yearSemSecList) ? implode('; ', $yearSemSecList) : 'II Year / III Sem / CSE-A';
+$classroomDisplay    = !empty($classroomsList) ? implode(', ', $classroomsList) : 'Room 36 / LAB-1';
+
+/* Dynamic metrics calculated from actual timetable data */
+$totalClasses = count($timetableRows);
+$today = strtoupper(date('l'));
+$todayClasses = 0;
+foreach ($timetableRows as $r) {
+    if (strtoupper($r['day']) === $today) {
+        $todayClasses++;
+    }
+}
+
 $username = htmlspecialchars(
-    (string)($_SESSION['username'] ?? 'Faculty'),
+    (string) ($_SESSION['username'] ?? 'Faculty'),
     ENT_QUOTES,
     'UTF-8'
 );
-
 $initial = strtoupper(substr($username, 0, 1));
 
-$totalClasses = 0;
-foreach ($days as $day) {
-    for ($period = 1; $period <= 9; $period++) {
-        $subject = $timetable[$day][$period] ?? '';
-        if (trim((string)$subject) !== '') {
-            $totalClasses++;
-        }
+/* Helper function to check if consecutive periods represent the exact same continuous class */
+function areConsecutivePeriodsEqual($a, $b)
+{
+    if (!$a || !$b) {
+        return false;
     }
+    return ($a['subject_id'] === $b['subject_id'] &&
+            $a['section_id'] === $b['section_id'] &&
+            $a['classroom_id'] === $b['classroom_id']);
 }
 
-$today = strtoupper(date('l'));
-$todayClasses = 0;
-if (in_array($today, $days, true)) {
-    for ($period = 1; $period <= 9; $period++) {
-        $subject = $timetable[$today][$period] ?? '';
-        if (trim((string)$subject) !== '') {
-            $todayClasses++;
-        }
-    }
+function ttSafe($val)
+{
+    return htmlspecialchars((string) $val, ENT_QUOTES, 'UTF-8');
 }
 ?>
 <!DOCTYPE html>
@@ -105,7 +258,21 @@ if (in_array($today, $days, true)) {
     <link rel="stylesheet" href="../assets/css/style.css?v=dark3">
 
     <style>
-        /* ONLY timetable page styling */
+        /* =========================================================
+           1. PRESERVED FACULTY PORTAL SHELL & HERO STYLES
+           ========================================================= */
+        .fd-dark.fd-timetable-page .fd-sidebar {
+            overflow-y: hidden;
+            scrollbar-width: none;
+            -ms-overflow-style: none;
+        }
+
+        .fd-dark.fd-timetable-page .fd-sidebar::-webkit-scrollbar {
+            display: none;
+            width: 0;
+            height: 0;
+        }
+
         .fd-dark.fd-timetable-page .tt-hero {
             position: relative;
             display: flex;
@@ -230,14 +397,15 @@ if (in_array($today, $days, true)) {
 
         .fd-dark.fd-timetable-page .tt-section-head {
             display: flex;
-            align-items: end;
+            align-items: center;
             justify-content: space-between;
             gap: 18px;
             margin-bottom: 22px;
+            flex-wrap: wrap;
         }
 
         .fd-dark.fd-timetable-page .tt-section-head h2 {
-            margin: 8px 0 8px;
+            margin: 8px 0 6px;
             color: #fff;
             font-size: 24px;
         }
@@ -270,180 +438,417 @@ if (in_array($today, $days, true)) {
             display: inline-block;
         }
 
-        .fd-dark.fd-timetable-page .tt-table-wrap {
-            border: 1px solid #2a364b;
-            border-radius: 18px;
-            background: #172235;
-            overflow: hidden;
+        /* =========================================================
+           2. INSTITUTIONAL TIMETABLE - DARK NAVY/PURPLE THEME
+           Matching admin/my-timetable.php
+           ========================================================= */
+        .inst-paper-wrapper {
+            background: #172235 !important;
+            border: 1px solid #2a364b !important;
+            border-radius: 16px !important;
+            padding: 28px 28px 36px !important;
+            color: #f1f5ff !important;
+            box-shadow: 0 10px 28px rgba(0, 0, 0, 0.22) !important;
+            margin-bottom: 30px !important;
+            font-family: inherit;
+            max-width: 100% !important;
+            box-sizing: border-box !important;
+            overflow: hidden !important;
         }
 
-        .fd-dark.fd-timetable-page .tt-table-top {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 16px;
-            padding: 22px 24px;
-            border-bottom: 1px solid #2a364b;
+        /* Institutional Department Heading */
+        .inst-heading-block {
+            text-align: center;
+            margin-bottom: 20px;
+            padding-bottom: 14px;
+            border-bottom: 1px solid #2d3d54;
         }
 
-        .fd-dark.fd-timetable-page .tt-table-top h3 {
-            margin: 0 0 6px;
-            color: #fff;
-            font-size: 17px;
-        }
-
-        .fd-dark.fd-timetable-page .tt-table-top p {
-            margin: 0;
-            color: #96a4bc;
-            font-size: 12px;
-        }
-
-        .fd-dark.fd-timetable-page .tt-badge {
-            padding: 8px 12px;
-            border: 1px solid #51467c;
-            border-radius: 8px;
-            background: #302b50;
-            color: #cbbfff;
-            font-size: 11px;
-            font-weight: 750;
-            white-space: nowrap;
-        }
-
-        .fd-dark.fd-timetable-page .tt-scroll {
-            overflow-x: auto;
-            width: 100%;
-        }
-
-        .fd-dark.fd-timetable-page .tt-table {
-            width: 100%;
-            min-width: 980px;
-            border-collapse: separate;
-            border-spacing: 0;
-        }
-
-        .fd-dark.fd-timetable-page .tt-table thead th {
-            padding: 16px 10px;
-            background: #202d43;
-            color: #b7c3da;
-            font-size: 11px;
+        .inst-dept-title {
+            font-size: 21px;
             font-weight: 800;
-            text-align: center;
-            border-bottom: 1px solid #34435a;
+            color: #ffffff !important;
+            letter-spacing: 0.8px;
+            text-transform: uppercase;
+            margin: 0 0 6px 0;
+            line-height: 1.25;
         }
 
-        .fd-dark.fd-timetable-page .tt-table thead th:first-child {
-            min-width: 125px;
-            text-align: left;
-            padding-left: 20px;
-            background: #25324a;
-            position: sticky;
-            left: 0;
-            z-index: 3;
+        .inst-sub-title {
+            font-size: 13px;
+            font-weight: 700;
+            color: #b4a0ff !important;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
         }
 
-        .fd-dark.fd-timetable-page .tt-table tbody th,
-        .fd-dark.fd-timetable-page .tt-table tbody td {
-            height: 86px;
-            padding: 10px 8px;
-            text-align: center;
-            border-bottom: 1px solid #29364b;
+        /* Metadata Table */
+        .inst-paper-wrapper table.inst-meta-table {
+            width: 100% !important;
+            border-collapse: collapse !important;
+            margin-bottom: 20px !important;
+            background: #111a2b !important;
+            border: 1px solid #28374d !important;
+            border-radius: 8px !important;
+            overflow: hidden !important;
         }
 
-        .fd-dark.fd-timetable-page .tt-table tbody tr:last-child th,
-        .fd-dark.fd-timetable-page .tt-table tbody tr:last-child td {
-            border-bottom: 0;
+        .inst-paper-wrapper table.inst-meta-table td {
+            padding: 8px 14px !important;
+            border: 1px solid #253347 !important;
+            font-size: 12.5px !important;
+            color: #cbd5e5 !important;
+            background: #131c2d !important;
+            line-height: 1.45 !important;
+            vertical-align: middle !important;
         }
 
-        .fd-dark.fd-timetable-page .tt-day {
-            min-width: 125px;
-            text-align: left !important;
-            padding-left: 20px !important;
-            background: #1c293e;
-            color: #e6e8f6;
-            font-size: 12px;
-            font-weight: 750;
-            position: sticky;
-            left: 0;
-            z-index: 2;
+        .inst-paper-wrapper table.inst-meta-table td.meta-label {
+            font-weight: 700 !important;
+            width: 175px !important;
+            white-space: nowrap !important;
+            background: #192437 !important;
+            color: #a4b4cb !important;
         }
 
-        .fd-dark.fd-timetable-page .tt-day span,
-        .fd-dark.fd-timetable-page .tt-day small {
-            display: block;
+        .inst-paper-wrapper table.inst-meta-table td.meta-val {
+            font-weight: 500 !important;
+            color: #f1f5ff !important;
         }
 
-        .fd-dark.fd-timetable-page .tt-day small {
-            margin-top: 5px;
-            color: #b9a7ff;
-            font-size: 10px;
+        .inst-paper-wrapper table.inst-meta-table td.meta-val strong {
+            color: #b4a0ff !important;
+            font-weight: 700 !important;
         }
 
-        .fd-dark.fd-timetable-page .tt-table tbody tr:hover td {
-            background: #1f2d43;
-        }
-
-        .fd-dark.fd-timetable-page .tt-today td {
-            background: #211f3d;
-        }
-
-        .fd-dark.fd-timetable-page .tt-today .tt-day {
-            background: #39315b;
-            color: #fff;
-        }
-
-        .fd-dark.fd-timetable-page .tt-subject {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
+        /* Responsive Table Wrapper */
+        .inst-table-responsive {
             width: 100%;
-            max-width: 150px;
-            min-height: 40px;
-            padding: 8px 10px;
-            border: 1px solid #53457f;
-            border-radius: 10px;
-            background: #352c53;
-            color: #e0d4ff;
-            font-size: 11px;
-            font-weight: 650;
-            line-height: 1.5;
-            overflow-wrap: anywhere;
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+            margin-bottom: 24px;
+            border-radius: 8px;
         }
 
-        .fd-dark.fd-timetable-page .tt-empty {
-            color: #62728d;
-            font-size: 18px;
+        /* Institutional Timetable Grid */
+        .inst-paper-wrapper table.inst-timetable-grid {
+            width: 100% !important;
+            min-width: 1020px !important;
+            border-collapse: collapse !important;
+            table-layout: fixed !important;
+            background: #111a2b !important;
+            border: 1px solid #2a384e !important;
+            margin: 0 !important;
         }
 
-        .fd-dark.fd-timetable-page .tt-table-foot {
+        .inst-paper-wrapper table.inst-timetable-grid th,
+        .inst-paper-wrapper table.inst-timetable-grid td {
+            border: 1px solid #28374d !important;
+            padding: 6px 3px !important;
+            text-align: center !important;
+            vertical-align: middle !important;
+            background: #172235 !important;
+            color: #cbd5e5 !important;
+        }
+
+        .inst-paper-wrapper table.inst-timetable-grid th:first-child,
+        .inst-paper-wrapper table.inst-timetable-grid td:first-child {
+            width: 95px !important;
+            min-width: 95px !important;
+            max-width: 95px !important;
+        }
+
+        /* Header Columns */
+        .inst-paper-wrapper table.inst-timetable-grid th.th-day {
+            width: 95px !important;
+            font-size: 13px !important;
+            font-weight: 800 !important;
+            background: #24203f !important;
+            color: #ded4ff !important;
+            text-transform: uppercase !important;
+            letter-spacing: 0.5px !important;
+            border: 1px solid #373155 !important;
+        }
+
+        .inst-paper-wrapper table.inst-timetable-grid th.th-period {
+            width: 9.8% !important;
+            background: #1d273a !important;
+            padding: 7px 2px !important;
+            border: 1px solid #28374d !important;
+        }
+
+        .inst-paper-wrapper .p-title {
+            display: block !important;
+            font-size: 13.5px !important;
+            font-weight: 800 !important;
+            color: #f1f5ff !important;
+            line-height: 1.2 !important;
+        }
+
+        .inst-paper-wrapper .p-time {
+            display: block !important;
+            font-size: 10px !important;
+            font-weight: 600 !important;
+            color: #9ba9c1 !important;
+            margin-top: 2px !important;
+            white-space: nowrap !important;
+        }
+
+        .inst-paper-wrapper table.inst-timetable-grid th.th-lunch {
+            width: 48px !important;
+            background: #231e3b !important;
+            border: 1px solid #3d345c !important;
+        }
+
+        .inst-paper-wrapper table.inst-timetable-grid th.th-lunch .p-title {
+            font-size: 11px !important;
+            font-weight: 800 !important;
+            color: #ded4ff !important;
+        }
+
+        .inst-paper-wrapper table.inst-timetable-grid th.th-lunch .p-time {
+            font-size: 9px !important;
+            font-weight: 600 !important;
+            color: #b4a0ff !important;
+        }
+
+        /* Day labels in tbody */
+        .inst-paper-wrapper table.inst-timetable-grid th.td-day-label {
+            width: 95px !important;
+            font-size: 12.5px !important;
+            font-weight: 800 !important;
+            background: #182234 !important;
+            color: #ded4ff !important;
+            height: 80px !important;
+            text-align: center !important;
+            letter-spacing: 0.5px !important;
+            border: 1px solid #28374d !important;
+        }
+
+        /* Assigned Class Cells */
+        .inst-paper-wrapper .td-assigned {
+            background: #162032 !important;
+            height: 80px !important;
+            padding: 5px 3px !important;
+            border: 1px solid #263449 !important;
+            transition: background 0.2s ease, border-color 0.2s ease;
+        }
+
+        .inst-paper-wrapper .td-assigned:hover {
+            background: #1d2b42 !important;
+            border-color: #51477c !important;
+        }
+
+        /* Lab sessions with distinct subtle purple panel styling */
+        .inst-paper-wrapper .td-lab {
+            background: #1b1935 !important;
+            border: 1px solid #3c335b !important;
+        }
+
+        .inst-paper-wrapper .td-lab:hover {
+            background: #252248 !important;
+            border-color: #725bb8 !important;
+        }
+
+        .inst-paper-wrapper .inst-slot-box {
+            display: flex !important;
+            flex-direction: column !important;
+            justify-content: center !important;
+            align-items: center !important;
+            min-height: 70px !important;
+            gap: 2px !important;
+        }
+
+        .inst-paper-wrapper .inst-subj-code {
+            font-size: 13px !important;
+            font-weight: 800 !important;
+            color: #ffffff !important;
+            letter-spacing: 0.3px !important;
+            line-height: 1.2 !important;
+        }
+
+        .inst-paper-wrapper .inst-subj-name {
+            font-size: 11px !important;
+            font-weight: 550 !important;
+            color: #cbd5e5 !important;
+            max-width: 100% !important;
+            line-height: 1.2 !important;
+            text-align: center !important;
+            overflow: hidden !important;
+            text-overflow: ellipsis !important;
+            white-space: nowrap !important;
+        }
+
+        .inst-paper-wrapper .inst-slot-meta {
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            gap: 4px !important;
+            margin-top: 3px !important;
+            font-size: 10px !important;
+            flex-wrap: wrap !important;
+        }
+
+        .inst-paper-wrapper .badge-lab {
+            background: #39285c !important;
+            color: #e9d5ff !important;
+            border: 1px solid #6b4cb3 !important;
+            font-size: 9px !important;
+            font-weight: 800 !important;
+            padding: 1px 5px !important;
+            border-radius: 3px !important;
+            text-transform: uppercase !important;
+        }
+
+        .inst-paper-wrapper .room-tag {
+            background: #1c2b40 !important;
+            color: #a5c2ea !important;
+            border: 1px solid #2e4363 !important;
+            font-size: 10px !important;
+            font-weight: 600 !important;
+            padding: 1px 5px !important;
+            border-radius: 3px !important;
+        }
+
+        .inst-paper-wrapper .sec-tag {
+            background: #272040 !important;
+            color: #d6ccf8 !important;
+            border: 1px solid #433966 !important;
+            font-size: 10px !important;
+            font-weight: 600 !important;
+            padding: 1px 5px !important;
+            border-radius: 3px !important;
+        }
+
+        /* Empty Period Cells */
+        .inst-paper-wrapper .td-free {
+            background: #121927 !important;
+            border: 1px solid #1f2a3a !important;
+            height: 80px !important;
+        }
+
+        .inst-paper-wrapper .free-dash {
+            color: #4c5d79 !important;
+            font-size: 16px !important;
+            font-weight: 700 !important;
+            user-select: none !important;
+        }
+
+        /* Vertically Merged Lunch Break Column */
+        .inst-paper-wrapper table.inst-timetable-grid td.td-lunch-vertical {
+            background: linear-gradient(180deg, #1e1933 0%, #151326 100%) !important;
+            width: 48px !important;
+            min-width: 48px !important;
+            max-width: 48px !important;
+            padding: 0 !important;
+            text-align: center !important;
+            vertical-align: middle !important;
+            border: 1px solid #372e54 !important;
+        }
+
+        .inst-paper-wrapper .lunch-text-vertical {
+            writing-mode: vertical-rl !important;
+            transform: rotate(180deg) !important;
+            font-weight: 800 !important;
+            font-size: 12.5px !important;
+            letter-spacing: 5px !important;
+            color: #c4b5fd !important;
+            text-transform: uppercase !important;
+            white-space: nowrap !important;
+            margin: 0 auto !important;
+            user-select: none !important;
+            display: inline-block !important;
+            padding: 14px 0 !important;
+        }
+
+        /* Course Summary Table */
+        .inst-summary-section {
+            margin-top: 26px;
+            border-top: 1px solid #2d3d54;
+            padding-top: 16px;
+        }
+
+        .inst-summary-title {
+            font-size: 13.5px;
+            font-weight: 800;
+            color: #f1f5ff !important;
+            text-transform: uppercase;
+            letter-spacing: 0.4px;
+            margin-bottom: 10px;
+        }
+
+        .inst-paper-wrapper table.inst-summary-table {
+            width: 100% !important;
+            border-collapse: collapse !important;
+            background: #111a2b !important;
+            border: 1px solid #28374d !important;
+            border-radius: 8px !important;
+            overflow: hidden !important;
+            font-size: 12px !important;
+            margin: 0 !important;
+        }
+
+        .inst-paper-wrapper table.inst-summary-table th,
+        .inst-paper-wrapper table.inst-summary-table td {
+            border: 1px solid #253347 !important;
+            padding: 7px 10px !important;
+            color: #cbd5e5 !important;
+            background: #151e2f !important;
+        }
+
+        .inst-paper-wrapper table.inst-summary-table th {
+            background: #1f2b40 !important;
+            color: #ded4ff !important;
+            font-weight: 750 !important;
+            text-transform: uppercase !important;
+            font-size: 11px !important;
+            letter-spacing: 0.3px !important;
+        }
+
+        .inst-paper-wrapper .summary-type-tag {
+            font-size: 9.5px !important;
+            font-weight: 700 !important;
+            padding: 2px 6px !important;
+            background: #282348 !important;
+            color: #ded4ff !important;
+            border: 1px solid #4d417b !important;
+            border-radius: 3px !important;
+            text-transform: uppercase !important;
+        }
+
+        .inst-paper-wrapper .summary-total-row td {
+            background: #1a2537 !important;
+            color: #ffffff !important;
+            font-weight: 800 !important;
+            border-top: 2px solid #374762 !important;
+        }
+
+        /* Signature Block */
+        .inst-sig-block {
+            margin-top: 40px;
             display: flex;
-            flex-wrap: wrap;
-            gap: 22px;
-            padding: 16px 22px;
-            border-top: 1px solid #2a364b;
+            justify-content: space-between;
+            align-items: flex-end;
+            padding: 0 10px;
         }
 
-        .fd-dark.fd-timetable-page .tt-table-foot span {
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            color: #a0aec2;
-            font-size: 11px;
+        .inst-sig-block .sig-col {
+            width: 22%;
+            text-align: center;
         }
 
-        .fd-dark.fd-timetable-page .tt-dot {
-            width: 10px;
-            height: 10px;
-            border-radius: 3px;
-            background: #9d83ff;
-            display: inline-block;
+        .inst-sig-block .sig-line {
+            height: 1px;
+            background: #3c4b66;
+            margin-bottom: 8px;
         }
 
-        .fd-dark.fd-timetable-page .tt-box {
-            width: 10px;
-            height: 10px;
-            border-radius: 3px;
-            border: 1px solid #6c7a91;
-            display: inline-block;
+        .inst-sig-block .sig-text {
+            font-size: 11.5px;
+            font-weight: 700;
+            color: #9ba9c1 !important;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
         }
 
         @media (max-width: 1100px) {
@@ -470,16 +875,187 @@ if (in_array($today, $days, true)) {
                 flex-direction: column;
                 align-items: flex-start;
             }
+        }
 
-            .fd-dark.fd-timetable-page .tt-table-top {
-                flex-direction: column;
-                align-items: flex-start;
+        /* =========================================================
+           3. PRINT STYLES FOR INSTITUTIONAL HARD COPY (Landscape A4)
+           ========================================================= */
+        @page {
+            size: landscape;
+            margin: 8mm;
+        }
+
+        @media print {
+            body {
+                background: #ffffff !important;
+                color: #000000 !important;
             }
 
-            .fd-dark.fd-timetable-page .tt-table thead th:first-child,
-            .fd-dark.fd-timetable-page .tt-day {
-                min-width: 105px;
-                padding-left: 12px !important;
+            .fd-sidebar,
+            .fd-topbar,
+            .tt-hero,
+            .tt-summary,
+            .fd-footer,
+            .tt-section-head,
+            .no-print {
+                display: none !important;
+            }
+
+            .fd-layout,
+            .fd-content,
+            .fd-main,
+            .tt-section {
+                margin: 0 !important;
+                padding: 0 !important;
+                width: 100% !important;
+                min-height: auto !important;
+                background: transparent !important;
+            }
+
+            .inst-paper-wrapper {
+                background: #ffffff !important;
+                color: #000000 !important;
+                border: none !important;
+                box-shadow: none !important;
+                padding: 0 !important;
+                margin: 0 !important;
+            }
+
+            .inst-heading-block {
+                border-bottom: 2px solid #000000 !important;
+            }
+
+            .inst-dept-title {
+                color: #000000 !important;
+            }
+
+            .inst-sub-title {
+                color: #222222 !important;
+            }
+
+            .inst-paper-wrapper table.inst-meta-table {
+                background: #ffffff !important;
+                border: 1px solid #000000 !important;
+            }
+
+            .inst-paper-wrapper table.inst-meta-table td {
+                background: #ffffff !important;
+                color: #000000 !important;
+                border: 1px solid #000000 !important;
+            }
+
+            .inst-paper-wrapper table.inst-meta-table td.meta-label {
+                background: #f8f9fa !important;
+                color: #000000 !important;
+            }
+
+            .inst-paper-wrapper table.inst-meta-table td.meta-val {
+                color: #000000 !important;
+            }
+
+            .inst-paper-wrapper table.inst-meta-table td.meta-val strong {
+                color: #000000 !important;
+            }
+
+            .inst-table-responsive {
+                overflow: visible !important;
+            }
+
+            .inst-paper-wrapper table.inst-timetable-grid {
+                background: #ffffff !important;
+                border: 2px solid #000000 !important;
+                min-width: 100% !important;
+                page-break-inside: avoid;
+            }
+
+            .inst-paper-wrapper table.inst-timetable-grid th,
+            .inst-paper-wrapper table.inst-timetable-grid td {
+                background: #ffffff !important;
+                color: #000000 !important;
+                border: 1px solid #000000 !important;
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+            }
+
+            .inst-paper-wrapper table.inst-timetable-grid th.th-day,
+            .inst-paper-wrapper table.inst-timetable-grid th.td-day-label,
+            .inst-paper-wrapper table.inst-timetable-grid th.th-lunch {
+                background: #f1f3f5 !important;
+                color: #000000 !important;
+            }
+
+            .inst-paper-wrapper .p-title,
+            .inst-paper-wrapper .inst-subj-code {
+                color: #000000 !important;
+            }
+
+            .inst-paper-wrapper .p-time,
+            .inst-paper-wrapper .inst-subj-name,
+            .inst-paper-wrapper .room-tag,
+            .inst-paper-wrapper .sec-tag {
+                color: #222222 !important;
+                background: transparent !important;
+                border: none !important;
+            }
+
+            .inst-paper-wrapper .badge-lab {
+                background: #000000 !important;
+                color: #ffffff !important;
+                border: 1px solid #000000 !important;
+            }
+
+            .inst-paper-wrapper table.inst-timetable-grid td.td-lunch-vertical {
+                background: #f1f3f5 !important;
+                border: 1px solid #000000 !important;
+            }
+
+            .inst-paper-wrapper .lunch-text-vertical {
+                color: #000000 !important;
+            }
+
+            .inst-summary-section {
+                border-top: 1.5px solid #000000 !important;
+                page-break-inside: avoid;
+            }
+
+            .inst-summary-title {
+                color: #000000 !important;
+            }
+
+            .inst-paper-wrapper table.inst-summary-table {
+                background: #ffffff !important;
+                border: 1px solid #000000 !important;
+            }
+
+            .inst-paper-wrapper table.inst-summary-table th,
+            .inst-paper-wrapper table.inst-summary-table td {
+                background: #ffffff !important;
+                color: #000000 !important;
+                border: 1px solid #000000 !important;
+            }
+
+            .inst-paper-wrapper table.inst-summary-table th,
+            .inst-paper-wrapper .summary-total-row td {
+                background: #f1f3f5 !important;
+            }
+
+            .inst-paper-wrapper .summary-type-tag {
+                background: transparent !important;
+                color: #000000 !important;
+                border: 1px solid #000000 !important;
+            }
+
+            .inst-sig-block {
+                page-break-inside: avoid;
+                margin-top: 30px !important;
+            }
+
+            .inst-sig-block .sig-line {
+                background: #000000 !important;
+            }
+
+            .inst-sig-block .sig-text {
+                color: #000000 !important;
             }
         }
     </style>
@@ -489,8 +1065,8 @@ if (in_array($today, $days, true)) {
 
 <div class="fd-layout">
 
-    <!-- SIDEBAR -->
-    <aside class="fd-sidebar" id="faculty-sidebar">
+    <!-- 1. SIDEBAR (Preserved Faculty Sidebar) -->
+    <aside class="fd-sidebar no-print" id="faculty-sidebar">
 
         <a href="dashboard.php" class="fd-brand">
             <span class="fd-brand-logo">
@@ -583,10 +1159,11 @@ if (in_array($today, $days, true)) {
         </div>
     </aside>
 
-    <!-- MAIN CONTENT -->
+    <!-- 2. MAIN CONTENT AREA -->
     <div class="fd-content">
 
-        <header class="fd-topbar">
+        <!-- TOPBAR -->
+        <header class="fd-topbar no-print">
             <div class="fd-topbar-left">
                 <button type="button" id="fd-menu-button"
                         class="fd-menu-button"
@@ -612,9 +1189,11 @@ if (in_array($today, $days, true)) {
             </div>
         </header>
 
+        <!-- MAIN SCROLLABLE CONTENT -->
         <main class="fd-main">
 
-            <section class="tt-hero">
+            <!-- HERO BANNER (Preserved Purple Gradient Hero) -->
+            <section class="tt-hero no-print">
                 <div class="tt-hero-content">
                     <span class="tt-eyebrow">✦ YOUR TEACHING SCHEDULE</span>
                     <h1>My Weekly Timetable</h1>
@@ -630,7 +1209,8 @@ if (in_array($today, $days, true)) {
                 </div>
             </section>
 
-            <section class="tt-summary">
+            <!-- STATISTIC SUMMARY CARDS (Dynamic from actual database timetable) -->
+            <section class="tt-summary no-print">
                 <div class="tt-stat">
                     <span class="tt-stat-label">WEEKLY CLASSES</span>
                     <strong><?= $totalClasses ?></strong>
@@ -656,79 +1236,259 @@ if (in_array($today, $days, true)) {
                 </div>
             </section>
 
+            <!-- TIMETABLE SECTION (Institutional Layout with Dark Navy/Purple Portal Theme) -->
             <section class="tt-section">
-                <div class="tt-section-head">
+                <div class="tt-section-head no-print">
                     <div>
-                        <span class="fd-section-eyebrow">ACADEMIC SCHEDULE</span>
+                        <span class="fd-section-eyebrow" style="color: #a690ff; font-size: 10px; font-weight: 800; letter-spacing: 1.2px;">ACADEMIC SCHEDULE</span>
                         <h2>Weekly Class Schedule</h2>
                         <p>View your assigned subjects across nine periods each day.</p>
                     </div>
 
-                    <span class="tt-pill">
-                        <span class="tt-pill-dot"></span>
-                        Faculty Timetable
-                    </span>
+                    <div style="display: flex; align-items: center; gap: 12px;">
+                        <span class="tt-pill">
+                            <span class="tt-pill-dot"></span>
+                            Faculty Timetable
+                        </span>
+
+                        <button
+                            type="button"
+                            onclick="window.print()"
+                            class="tt-print-btn"
+                            style="display: inline-flex; align-items: center; gap: 8px; padding: 9px 16px; background: #252b47; border: 1px solid #554988; border-radius: 8px; color: #ded4ff; font-size: 12px; font-weight: 700; cursor: pointer; transition: all .15s ease;"
+                        >
+                            🖨 Print Timetable
+                        </button>
+                    </div>
                 </div>
 
-                <div class="tt-table-wrap">
-                    <div class="tt-table-top">
-                        <div>
-                            <h3>Class Timetable</h3>
-                            <p>Scroll horizontally to view all periods on smaller screens.</p>
+                <!-- INSTITUTIONAL TIMETABLE CONTAINER (Dark Navy / Purple Theme) -->
+                <div class="inst-paper-wrapper">
+
+                    <!-- 1. Centered Department Heading -->
+                    <div class="inst-heading-block">
+                        <h2 class="inst-dept-title">DEPARTMENT OF <?= strtoupper(ttSafe($deptName)) ?></h2>
+                        <div class="inst-sub-title">
+                            FACULTY INDIVIDUAL TIME TABLE — ACADEMIC YEAR <?= ttSafe($academicYearDisplay) ?>
                         </div>
-                        <span class="tt-badge">P1 – P9</span>
                     </div>
 
-                    <div class="tt-scroll">
-                        <table class="tt-table">
+                    <!-- 2. Faculty Academic Metadata Rows -->
+                    <table class="inst-meta-table">
+                        <tbody>
+                            <tr>
+                                <td class="meta-label">Year / Semester / Section:</td>
+                                <td class="meta-val"><?= ttSafe($yearSemSecDisplay) ?></td>
+                                <td class="meta-label">Classroom Number:</td>
+                                <td class="meta-val"><?= ttSafe($classroomDisplay) ?></td>
+                                <td class="meta-label">Academic Year:</td>
+                                <td class="meta-val"><?= ttSafe($academicYearDisplay) ?></td>
+                            </tr>
+                            <tr>
+                                <td class="meta-label">Faculty Name:</td>
+                                <td class="meta-val"><strong><?= ttSafe($facultyName) ?></strong> (<?= ttSafe($facultyCode) ?>)</td>
+                                <td class="meta-label">Designation:</td>
+                                <td class="meta-val"><?= ttSafe($designation) ?></td>
+                                <td class="meta-label">Department:</td>
+                                <td class="meta-val"><?= ttSafe($deptName) ?></td>
+                            </tr>
+                        </tbody>
+                    </table>
+
+                    <!-- 3. Institutional Timetable Grid Table -->
+                    <div class="inst-table-responsive">
+                        <table class="inst-timetable-grid">
                             <thead>
                                 <tr>
-                                    <th>Day</th>
-                                    <?php for ($period = 1; $period <= 9; $period++): ?>
-                                        <th>P<?= $period ?></th>
+                                    <th class="th-day">DAY</th>
+
+                                    <!-- Periods P1 to P6 -->
+                                    <?php for ($p = 1; $p <= 6; $p++): ?>
+                                        <th class="th-period">
+                                            <span class="p-title">P<?= $p ?></span>
+                                            <span class="p-time"><?= ttSafe($periods[$p]['formatted']) ?></span>
+                                        </th>
+                                    <?php endfor; ?>
+
+                                    <!-- Distinct Lunch Break Column Header between P6 and P7 -->
+                                    <th class="th-lunch">
+                                        <span class="p-title">LUNCH</span>
+                                        <span class="p-time">13:15–14:00</span>
+                                    </th>
+
+                                    <!-- Periods P7 to P9 -->
+                                    <?php for ($p = 7; $p <= 9; $p++): ?>
+                                        <th class="th-period">
+                                            <span class="p-title">P<?= $p ?></span>
+                                            <span class="p-time"><?= ttSafe($periods[$p]['formatted']) ?></span>
+                                        </th>
                                     <?php endfor; ?>
                                 </tr>
                             </thead>
-                            <tbody>
-                                <?php foreach ($days as $day): ?>
-                                    <?php $isToday = ($day === $today); ?>
-                                    <tr class="<?= $isToday ? 'tt-today' : '' ?>">
-                                        <th class="tt-day">
-                                            <span><?= ucfirst(strtolower($day)) ?></span>
-                                            <?php if ($isToday): ?>
-                                                <small>Today</small>
-                                            <?php endif; ?>
-                                        </th>
 
-                                        <?php for ($period = 1; $period <= 9; $period++): ?>
-                                            <?php
-                                            $subject = $timetable[$day][$period] ?? '';
-                                            $hasClass = trim((string)$subject) !== '';
-                                            ?>
-                                            <td>
-                                                <?php if ($hasClass): ?>
-                                                    <span class="tt-subject">
-                                                        <?= htmlspecialchars($subject, ENT_QUOTES, 'UTF-8') ?>
-                                                    </span>
-                                                <?php else: ?>
-                                                    <span class="tt-empty">—</span>
-                                                <?php endif; ?>
+                            <tbody>
+                                <?php foreach ($days as $dayIdx => $dayName): ?>
+                                    <tr>
+                                        <!-- Day Label Column -->
+                                        <th class="td-day-label"><?= ttSafe($dayName) ?></th>
+
+                                        <!-- Periods 1 to 6 with Horizontal Consecutive Merging -->
+                                        <?php
+                                        $skipUntil = 0;
+                                        for ($p = 1; $p <= 6; $p++):
+                                            if ($p <= $skipUntil) {
+                                                continue;
+                                            }
+                                            $entry = $grid[$dayName][$p] ?? null;
+
+                                            if ($entry):
+                                                $span = 1;
+                                                for ($nextP = $p + 1; $nextP <= 6; $nextP++):
+                                                    $nextEntry = $grid[$dayName][$nextP] ?? null;
+                                                    if ($nextEntry && areConsecutivePeriodsEqual($entry, $nextEntry)):
+                                                        $span++;
+                                                        $skipUntil = $nextP;
+                                                    else:
+                                                        break;
+                                                    endif;
+                                                endfor;
+                                                $isLab = strtoupper($entry['subject_type'] ?? '') === 'LAB';
+                                        ?>
+                                            <td colspan="<?= $span ?>" class="td-assigned <?= $isLab ? 'td-lab' : '' ?>">
+                                                <div class="inst-slot-box">
+                                                    <div class="inst-subj-code">
+                                                        <?= ttSafe($entry['subject_code']) ?>
+                                                    </div>
+                                                    <div class="inst-subj-name" title="<?= ttSafe($entry['subject_name']) ?>">
+                                                        <?= ttSafe($entry['subject_name']) ?>
+                                                    </div>
+                                                    <div class="inst-slot-meta">
+                                                        <?php if ($isLab): ?>
+                                                            <span class="badge-lab">LAB</span>
+                                                        <?php endif; ?>
+                                                        <span class="room-tag"><?= ttSafe($entry['room_number']) ?></span>
+                                                        <span class="sec-tag">(<?= ttSafe($entry['section_name']) ?>)</span>
+                                                    </div>
+                                                </div>
                                             </td>
-                                        <?php endfor; ?>
+                                        <?php else: ?>
+                                            <td class="td-free">
+                                                <span class="free-dash">—</span>
+                                            </td>
+                                        <?php endif; endfor; ?>
+
+                                        <!-- Vertically Merged Lunch Break Column (Row 0 with rowspan=6) -->
+                                        <?php if ($dayIdx === 0): ?>
+                                            <td rowspan="6" class="td-lunch-vertical">
+                                                <div class="lunch-text-vertical">
+                                                    LUNCH BREAK
+                                                </div>
+                                            </td>
+                                        <?php endif; ?>
+
+                                        <!-- Periods 7 to 9 with Horizontal Consecutive Merging -->
+                                        <?php
+                                        $skipUntil = 0;
+                                        for ($p = 7; $p <= 9; $p++):
+                                            if ($p <= $skipUntil) {
+                                                continue;
+                                            }
+                                            $entry = $grid[$dayName][$p] ?? null;
+
+                                            if ($entry):
+                                                $span = 1;
+                                                for ($nextP = $p + 1; $nextP <= 9; $nextP++):
+                                                    $nextEntry = $grid[$dayName][$nextP] ?? null;
+                                                    if ($nextEntry && areConsecutivePeriodsEqual($entry, $nextEntry)):
+                                                        $span++;
+                                                        $skipUntil = $nextP;
+                                                    else:
+                                                        break;
+                                                    endif;
+                                                endfor;
+                                                $isLab = strtoupper($entry['subject_type'] ?? '') === 'LAB';
+                                        ?>
+                                            <td colspan="<?= $span ?>" class="td-assigned <?= $isLab ? 'td-lab' : '' ?>">
+                                                <div class="inst-slot-box">
+                                                    <div class="inst-subj-code">
+                                                        <?= ttSafe($entry['subject_code']) ?>
+                                                    </div>
+                                                    <div class="inst-subj-name" title="<?= ttSafe($entry['subject_name']) ?>">
+                                                        <?= ttSafe($entry['subject_name']) ?>
+                                                    </div>
+                                                    <div class="inst-slot-meta">
+                                                        <?php if ($isLab): ?>
+                                                            <span class="badge-lab">LAB</span>
+                                                        <?php endif; ?>
+                                                        <span class="room-tag"><?= ttSafe($entry['room_number']) ?></span>
+                                                        <span class="sec-tag">(<?= ttSafe($entry['section_name']) ?>)</span>
+                                                    </div>
+                                                </div>
+                                            </td>
+                                        <?php else: ?>
+                                            <td class="td-free">
+                                                <span class="free-dash">—</span>
+                                            </td>
+                                        <?php endif; endfor; ?>
+
                                     </tr>
                                 <?php endforeach; ?>
                             </tbody>
                         </table>
                     </div>
 
-                    <div class="tt-table-foot">
-                        <span><span class="tt-dot"></span> Assigned subject</span>
-                        <span><span class="tt-box"></span> Free period</span>
-                    </div>
+                    <!-- 4. Course Allocation & Workload Summary Table -->
+                    <?php if (!empty($subjectSummary)): ?>
+                        <div class="inst-summary-section">
+                            <div class="inst-summary-title">Course Allocation &amp; Workload Summary</div>
+                            <table class="inst-summary-table">
+                                <thead>
+                                    <tr>
+                                        <th style="width: 50px; text-align: center;">S.No</th>
+                                        <th style="width: 120px;">Subject Code</th>
+                                        <th>Subject Name</th>
+                                        <th style="width: 90px; text-align: center;">Type</th>
+                                        <th style="width: 120px;">Section(s)</th>
+                                        <th style="width: 120px;">Room / Lab</th>
+                                        <th style="width: 120px; text-align: center;">Weekly Hours</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <?php
+                                    $sno = 1;
+                                    $totalHours = 0;
+                                    foreach ($subjectSummary as $sum):
+                                        $totalHours += $sum['hours'];
+                                    ?>
+                                        <tr>
+                                            <td style="text-align: center;"><?= $sno++ ?></td>
+                                            <td><strong><?= ttSafe($sum['code']) ?></strong></td>
+                                            <td><?= ttSafe($sum['name']) ?></td>
+                                            <td style="text-align: center;">
+                                                <span class="summary-type-tag">
+                                                    <?= ttSafe($sum['type']) ?>
+                                                </span>
+                                            </td>
+                                            <td><?= ttSafe(implode(', ', $sum['sections'])) ?></td>
+                                            <td><?= ttSafe(implode(', ', $sum['rooms'])) ?></td>
+                                            <td style="text-align: center; font-weight: 700;"><?= (int) $sum['hours'] ?> hrs</td>
+                                        </tr>
+                                    <?php endforeach; ?>
+                                    <tr class="summary-total-row">
+                                        <td colspan="6" style="text-align: right; font-weight: 800;">Total Assigned Teaching Hours:</td>
+                                        <td style="text-align: center; font-weight: 800;"><?= $totalHours ?> hrs / week</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    <?php endif; ?>
+
+
                 </div>
             </section>
 
-            <footer class="fd-footer">
+            <!-- FOOTER -->
+            <footer class="fd-footer no-print">
                 <span>© <?= date('Y') ?> Smart Faculty Assistant Portal</span>
                 <span>Faculty Timetable</span>
             </footer>

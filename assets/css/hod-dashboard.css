@@ -1,4 +1,4 @@
-﻿
+
 /* ============================================
    SMART FACULTY ASSISTANT
    PREMIUM DARK HOD DASHBOARD
@@ -26,6 +26,8 @@
 
 html {
     scroll-behavior: smooth;
+    scrollbar-gutter: stable;
+    overflow-y: scroll;
 }
 
 body {

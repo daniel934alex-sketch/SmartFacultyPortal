@@ -1,0 +1,4 @@
+Day,Period,Subject,Faculty,Classroom,Status
+FUNDAY,1,UNKNOWN-SUB,"Fake Faculty",999,PUBLISHED
+MONDAY,15,DBMS,"Dr. Arun Kumar",36,PUBLISHED
+MONDAY,1,ADSA,"Prof. Priya Sharma",37,PUBLISHED

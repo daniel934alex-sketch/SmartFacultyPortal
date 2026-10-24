@@ -59,6 +59,11 @@ $initial = strtoupper(substr($facultyName, 0, 1));
    All styling belongs to this page only
    ========================================= */
 
+html {
+    scrollbar-gutter: stable;
+    overflow-y: scroll;
+}
+
 body.fp-page {
     --bg: #0c1220;
     --sidebar: #111a2b;
@@ -109,6 +114,10 @@ body.fp-page {
     position: sticky;
     top: 0;
     flex: 0 0 264px;
+    width: 264px;
+    min-width: 264px;
+    max-width: 264px;
+    box-sizing: border-box;
     display: flex;
     flex-direction: column;
     height: 100vh;
@@ -332,8 +341,9 @@ body.fp-page {
 
 .fp-page .fp-main {
     width: min(1230px, 100%);
-    margin: auto;
+    margin: 0 auto;
     padding: 34px;
+    box-sizing: border-box;
 }
 
 /* HERO BANNER */
@@ -599,9 +609,12 @@ body.fp-page {
 
 /* TABLET */
 
-@media (max-width: 1050px) {
+@media (max-width: 1100px) {
     .fp-page .fp-sidebar {
-        flex-basis: 235px;
+        flex: 0 0 235px;
+        width: 235px;
+        min-width: 235px;
+        max-width: 235px;
     }
 
     .fp-page .fp-main {
@@ -621,6 +634,9 @@ body.fp-page {
         top: 0;
         left: 0;
         width: 270px;
+        min-width: 270px;
+        max-width: 270px;
+        flex: none;
         height: 100dvh;
         transform: translateX(-100%);
         transition: transform .25s ease;

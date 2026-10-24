@@ -43,6 +43,11 @@ $periods = [
 <title>Faculty Availability | Smart Faculty</title>
 
 <style>
+html {
+    scrollbar-gutter: stable;
+    overflow-y: scroll;
+}
+
 * {
     box-sizing: border-box;
 }
@@ -85,6 +90,10 @@ body.av-page {
     display: flex;
     flex-direction: column;
     flex: 0 0 264px;
+    width: 264px;
+    min-width: 264px;
+    max-width: 264px;
+    box-sizing: border-box;
     height: 100vh;
     overflow-y: auto;
     padding: 28px 17px 22px;
@@ -223,8 +232,9 @@ body.av-page {
     align-items: center;
     justify-content: space-between;
     min-height: 91px;
-    gap: 15px;
+    gap: 20px;
     padding: 17px 35px;
+    box-sizing: border-box;
     border-bottom: 1px solid #2a364b;
     background: #111a2b;
 }
@@ -286,8 +296,9 @@ body.av-page {
 
 .av-main {
     width: min(1230px, 100%);
-    margin: auto;
+    margin: 0 auto;
     padding: 34px;
+    box-sizing: border-box;
 }
 
 /* WELCOME BANNER */
@@ -731,7 +742,10 @@ body.av-page {
 
 @media (max-width: 1100px) {
     .av-sidebar {
-        flex-basis: 235px;
+        flex: 0 0 235px;
+        width: 235px;
+        min-width: 235px;
+        max-width: 235px;
     }
 
     .av-main {
@@ -749,7 +763,9 @@ body.av-page {
         left: 0;
         top: 0;
         width: 270px;
-        max-width: 85vw;
+        min-width: 270px;
+        max-width: 270px;
+        flex: none;
         height: 100dvh;
         transform: translateX(-100%);
         transition: transform .25s;

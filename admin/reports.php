@@ -134,7 +134,7 @@ main.reports-page{min-height:100vh;color:#edf1fb;box-sizing:border-box}
 .reports-actions{display:flex;gap:10px;align-items:center}
 .reports-button,.reports-reset,.reports-print{display:inline-flex;align-items:center;justify-content:center;min-height:46px;padding:0 18px;border:1px solid transparent;border-radius:10px;font-size:13px;font-weight:750;text-decoration:none;cursor:pointer;white-space:nowrap}
 .reports-button{background:#9c83ff;color:#11152b}.reports-reset{background:#28364d;color:#f4f6ff;border-color:#43516a}.reports-print{background:#302a55;color:#f3edff;border-color:#7664bb}
-.reports-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px;margin:18px 0 22px}
+.reports-summary{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px;margin:18px 0 22px}
 .reports-stat{min-width:0;padding:22px;border:1px solid #2d3a50;border-radius:16px;background:#172235}
 .reports-stat-label{margin:0 0 14px;color:#baa5ff;font-size:13px;font-weight:750}.reports-stat-number{color:#fff;font-size:32px;font-weight:800}
 .reports-table-scroll{width:100%;overflow-x:auto;border:1px solid #2d3a50;border-radius:12px}
@@ -205,7 +205,6 @@ main.reports-page{min-height:100vh;color:#edf1fb;box-sizing:border-box}
 
       <div class="reports-summary">
         <div class="reports-stat"><h2 class="reports-stat-label">Students Listed</h2><div class="reports-stat-number"><?= (int)$attendanceSummary['students'] ?></div></div>
-        <div class="reports-stat"><h2 class="reports-stat-label">Present Days</h2><div class="reports-stat-number"><?= (int)$attendanceSummary['present'] ?></div></div>
         <div class="reports-stat"><h2 class="reports-stat-label">Overall Attendance</h2><div class="reports-stat-number"><?= number_format($attendanceSummary['percentage'], 2) ?>%</div></div>
       </div>
 

@@ -1,23 +1,23 @@
 <?php
-
 /*
 |--------------------------------------------------------------------------
 | Sidebar
 |--------------------------------------------------------------------------
-|
 | This sidebar is used by the HOD/Admin portal.
-|
 */
-
 ?>
 
 <aside class="sidebar">
-
     <div class="sidebar-menu">
 
         <!-- Dashboard -->
         <a href="../admin/dashboard.php" class="sidebar-link">
             Dashboard
+        </a>
+
+        <!-- My Timetable -->
+        <a href="../admin/my-timetable.php" class="sidebar-link">
+            My Timetable
         </a>
 
         <!-- Faculty -->
@@ -71,5 +71,4 @@
         </a>
 
     </div>
-
 </aside>

@@ -1,0 +1,114 @@
+﻿/* Smart Faculty Portal - Handover Dark Theme */
+
+body.sf-handover-page {
+    background: #0c1220 !important;
+    color: #f5f6ff !important;
+    font-family: "Segoe UI", Arial, sans-serif;
+    min-height: 100vh;
+    margin: 0;
+}
+
+body.sf-handover-page .container,
+body.sf-handover-page main {
+    color: #f5f6ff;
+}
+
+/* Page Heading */
+body.sf-handover-page h1,
+body.sf-handover-page h2 {
+    color: #ffffff !important;
+    font-weight: 800;
+}
+
+body.sf-handover-page h1:first-of-type {
+    background: linear-gradient(110deg, #292348, #58468e);
+    border-radius: 18px;
+    padding: 28px 32px;
+    margin-bottom: 16px;
+}
+
+body.sf-handover-page p {
+    color: #b5c3d7;
+}
+
+/* Request Cards */
+body.sf-handover-page .card,
+body.sf-handover-page .handover-card,
+body.sf-handover-page .requests-card,
+body.sf-handover-page .empty-state {
+    background: #172235 !important;
+    color: #f5f6ff !important;
+    border: 1px solid #32415a !important;
+    border-radius: 16px !important;
+    padding: 30px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18);
+    margin-bottom: 20px;
+}
+
+/* Empty State */
+body.sf-handover-page .empty-state {
+    text-align: center;
+    padding: 55px 24px;
+    color: #aebdd2 !important;
+}
+
+/* Request Table */
+body.sf-handover-page table {
+    width: 100%;
+    background: #172235 !important;
+    color: white !important;
+    border-collapse: collapse;
+}
+
+body.sf-handover-page th {
+    background: #21304a !important;
+    color: #d7caff !important;
+    padding: 15px;
+    text-align: left;
+}
+
+body.sf-handover-page td {
+    padding: 15px;
+    border-bottom: 1px solid #32415a;
+    color: #edf0fb !important;
+}
+
+body.sf-handover-page tbody tr:hover {
+    background: #23314c;
+}
+
+/* Accepted Badge */
+body.sf-handover-page .badge-success,
+body.sf-handover-page .status-accepted {
+    background: #064e3b !important;
+    color: #6ee7b7 !important;
+    border-radius: 20px;
+    padding: 7px 14px;
+}
+
+/* Buttons */
+body.sf-handover-page .btn,
+body.sf-handover-page a[href*="dashboard"] {
+    background: #59458d !important;
+    color: white !important;
+    border: 1px solid #8f77e8 !important;
+    border-radius: 10px !important;
+    padding: 11px 20px;
+    text-decoration: none;
+    display: inline-block;
+}
+
+body.sf-handover-page .btn:hover,
+body.sf-handover-page a[href*="dashboard"]:hover {
+    background: #765baf !important;
+}
+
+@media (max-width: 768px) {
+    body.sf-handover-page h1:first-of-type {
+        padding: 20px;
+    }
+
+    body.sf-handover-page .card {
+        padding: 18px;
+    }
+}

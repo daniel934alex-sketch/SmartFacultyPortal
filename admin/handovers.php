@@ -180,9 +180,10 @@ if (!$result) {
 
     </style>
 
+<link rel="stylesheet" href="../assets/css/handover-dark.css">
 </head>
 
-<body>
+<body class="sf-handover-page">
 
 <div class="content">
 

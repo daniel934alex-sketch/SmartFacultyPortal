@@ -80,6 +80,44 @@ while ($row = $result->fetch_assoc()) {
 }
 
 $stmt->close();
+
+/* OUTGOING HANDOVER REQUESTS - requests sent BY this faculty */
+$outgoingSql = "
+    SELECT
+        hr.request_id,
+        hr.handover_id,
+        hr.status AS request_status,
+        hr.requested_at,
+        hr.responded_at,
+        ch.reason,
+        ch.status AS handover_status,
+        t.day,
+        t.period_id,
+        t.section_id,
+        t.subject_id,
+        t.classroom_id,
+        alternate_faculty.faculty_name AS alternate_faculty_name,
+        alternate_faculty.faculty_code AS alternate_faculty_code
+    FROM class_handover ch
+    INNER JOIN handover_requests hr
+        ON hr.handover_id = ch.handover_id
+    INNER JOIN timetable t
+        ON t.timetable_id = ch.timetable_id
+    INNER JOIN faculty alternate_faculty
+        ON alternate_faculty.faculty_id = hr.alternate_faculty_id
+    WHERE ch.original_faculty_id = ?
+    ORDER BY hr.requested_at DESC, hr.request_id DESC
+";
+
+$outgoingStmt = $conn->prepare($outgoingSql);
+$outgoingStmt->bind_param("i", $faculty_id);
+$outgoingStmt->execute();
+$outgoingResult = $outgoingStmt->get_result();
+$sentRequests = [];
+while ($sentRow = $outgoingResult->fetch_assoc()) {
+    $sentRequests[] = $sentRow;
+}
+$outgoingStmt->close();
 $conn->close();
 
 /* DISPLAY HELPERS */
@@ -106,6 +144,17 @@ foreach ($requests as $request) {
     if ($status === 'PENDING') $pending++;
     if ($status === 'ACCEPTED') $accepted++;
     if ($status === 'REJECTED') $rejected++;
+}
+
+$sentTotal = count($sentRequests);
+$sentPending = 0;
+$sentAccepted = 0;
+$sentRejected = 0;
+foreach ($sentRequests as $sentRequest) {
+    $sentStatus = strtoupper((string)$sentRequest['request_status']);
+    if ($sentStatus === 'PENDING') $sentPending++;
+    if ($sentStatus === 'ACCEPTED') $sentAccepted++;
+    if ($sentStatus === 'REJECTED') $sentRejected++;
 }
 ?>
 
@@ -903,6 +952,76 @@ body.hr-page {
         transition-duration: .01ms !important;
     }
 }
+
+/* REQUEST LIST FILTERS - scoped, no changes to request processing */
+.hr-page .hr-filter-bar {
+    display: grid;
+    grid-template-columns: minmax(155px, 1fr) minmax(220px, 1.5fr) minmax(155px, 1fr) auto;
+    align-items: end;
+    gap: 12px;
+    padding: 17px;
+    margin: 18px 0 10px;
+    border: 1px solid var(--hr-border);
+    border-radius: 15px;
+    background: var(--hr-card);
+}
+.hr-page .hr-filter-field { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.hr-page .hr-filter-field label {
+    color: #b7a4ff;
+    font-size: 11px;
+    font-weight: 750;
+    letter-spacing: .35px;
+}
+.hr-page .hr-filter-field input,
+.hr-page .hr-filter-field select {
+    width: 100%;
+    min-width: 0;
+    height: 43px;
+    padding: 0 12px;
+    border: 1px solid #3a4b65;
+    border-radius: 9px;
+    background: #0d1b2e;
+    color: #eef2ff;
+    font: inherit;
+    font-size: 12px;
+    color-scheme: dark;
+}
+.hr-page .hr-filter-field input:focus,
+.hr-page .hr-filter-field select:focus {
+    outline: 2px solid #ac9af9;
+    outline-offset: 1px;
+}
+.hr-page .hr-filter-field input::placeholder { color: #869ab6; }
+.hr-page .hr-filter-reset {
+    height: 43px;
+    padding: 0 16px;
+    border: 1px solid #7e70bd;
+    border-radius: 9px;
+    background: #332b59;
+    color: #eee8ff;
+    cursor: pointer;
+    font-weight: 700;
+    font-size: 12px;
+    white-space: nowrap;
+}
+.hr-page .hr-filter-reset:hover { background: #494077; }
+.hr-page .hr-filter-meta {
+    color: var(--hr-muted);
+    font-size: 12px;
+    margin: 10px 0 16px;
+}
+.hr-page .hr-filter-empty {
+    padding: 26px 20px;
+    margin: 10px 0 16px;
+}
+.hr-page [hidden] { display: none !important; }
+@media (max-width: 950px) {
+    .hr-page .hr-filter-bar { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 550px) {
+    .hr-page .hr-filter-bar { grid-template-columns: 1fr; }
+}
+
 </style>
 </head>
 
@@ -1046,9 +1165,8 @@ body.hr-page {
                     <h1>Handover Requests</h1>
 
                     <p>
-                        Review incoming class handover requests,
-                        check schedule details, and respond
-                        to your fellow faculty members.
+                        Review incoming handover requests, respond to colleagues,
+                        and track accepted or rejected requests you sent.
                     </p>
 
                     <a href="dashboard.php" class="hr-back">
@@ -1064,7 +1182,8 @@ body.hr-page {
                 </div>
             </section>
 
-            <!-- SUMMARY CARDS -->
+            <!-- SUMMARY CARDS: incoming requests only -->
+            <p class="hr-eyebrow" style="margin: 24px 0 0;">RECEIVED REQUEST SUMMARY</p>
             <section class="hr-summary" aria-label="Request summary">
 
                 <div class="hr-stat">
@@ -1091,6 +1210,144 @@ body.hr-page {
                     <small>Rejected requests</small>
                 </div>
 
+            </section>
+
+            <!-- SENT REQUESTS: visible to original requesting faculty -->
+            <section class="hr-section" aria-label="Outgoing handover requests">
+                <div class="hr-section-head">
+                    <div>
+                        <span class="hr-eyebrow">REQUEST TRACKING</span>
+                        <h2>Requests You Sent</h2>
+                        <p>Track which faculty accepted or rejected your class handover requests.</p>
+                    </div>
+                    <span class="hr-count-badge"><?= $sentTotal ?> Sent</span>
+                </div>
+
+                <div class="hr-summary" aria-label="Sent request status summary">
+                    <div class="hr-stat">
+                        <span class="hr-stat-label">TOTAL SENT</span>
+                        <strong><?= $sentTotal ?></strong>
+                        <small>Requests sent to other faculty</small>
+                    </div>
+                    <div class="hr-stat">
+                        <span class="hr-stat-label">AWAITING REPLY</span>
+                        <strong><?= $sentPending ?></strong>
+                        <small>Pending responses</small>
+                    </div>
+                    <div class="hr-stat">
+                        <span class="hr-stat-label">ACCEPTED</span>
+                        <strong><?= $sentAccepted ?></strong>
+                        <small>Faculty agreed to take over</small>
+                    </div>
+                    <div class="hr-stat">
+                        <span class="hr-stat-label">REJECTED</span>
+                        <strong><?= $sentRejected ?></strong>
+                        <small>Faculty declined the request</small>
+                    </div>
+                </div>
+
+                <!-- SENT REQUEST FILTERS (client-side, display only) -->
+                <div class="hr-filter-bar" aria-label="Filter sent requests">
+                    <div class="hr-filter-field">
+                        <label for="sent-status-filter">Status</label>
+                        <select id="sent-status-filter">
+                            <option value="ALL">All statuses</option>
+                            <option value="PENDING">Pending</option>
+                            <option value="ACCEPTED">Accepted</option>
+                            <option value="REJECTED">Rejected</option>
+                            <option value="EXPIRED">Expired</option>
+                        </select>
+                    </div>
+                    <div class="hr-filter-field">
+                        <label for="sent-search-filter">Search faculty / request</label>
+                        <input type="search" id="sent-search-filter"
+                               placeholder="Faculty name, code, day, period or #" autocomplete="off">
+                    </div>
+                    <div class="hr-filter-field">
+                        <label for="sent-date-filter">Request created on</label>
+                        <input type="date" id="sent-date-filter" aria-label="Filter by request creation date">
+                    </div>
+                    <button type="button" class="hr-filter-reset" id="sent-reset-filter">Clear filters</button>
+                </div>
+                <p class="hr-filter-meta" id="sent-filter-count" role="status" aria-live="polite">
+                    Showing <?= $sentTotal ?> of <?= $sentTotal ?> sent requests (summary cards show all requests).
+                </p>
+                <div class="hr-empty hr-filter-empty" id="sent-no-matches" hidden>
+                    <h3>No matching requests</h3>
+                    <p>Try another status, faculty name, or date.</p>
+                </div>
+
+                <div class="hr-request-list" id="sent-requests-list" style="margin-top: 20px;">
+                    <?php if ($sentTotal === 0): ?>
+                        <div class="hr-empty">
+                            <h3>No Sent Requests</h3>
+                            <p>You have not sent any handover requests yet.</p>
+                        </div>
+                    <?php else: ?>
+                        <?php foreach ($sentRequests as $sentRequest): ?>
+                            <?php
+                            $sentStatusText = strtoupper((string)$sentRequest['request_status']);
+                            $sentStatusLower = strtolower($sentStatusText);
+                            $sentStatusClass = in_array($sentStatusLower,
+                                ['pending', 'accepted', 'rejected', 'expired'], true)
+                                ? $sentStatusLower : 'other';
+                            ?>
+                            <article class="hr-request-card"
+                                id="sent-request-<?= (int)$sentRequest['request_id'] ?>"
+                                data-status="<?= reqEscape($sentStatusText) ?>"
+                                data-request-date="<?= reqEscape(substr((string)$sentRequest['requested_at'], 0, 10)) ?>"
+                                data-search="<?= reqEscape(implode(' ', [
+                                    $sentRequest['request_id'],
+                                    $sentRequest['alternate_faculty_name'],
+                                    $sentRequest['alternate_faculty_code'],
+                                    $sentRequest['day'],
+                                    'P' . $sentRequest['period_id'],
+                                    $sentRequest['section_id'],
+                                    $sentRequest['reason']
+                                ])) ?>">
+                                <div class="hr-request-header">
+                                    <div>
+                                        <span class="hr-request-number">SENT HANDOVER REQUEST</span>
+                                        <h3>Request #<?= (int)$sentRequest['request_id'] ?></h3>
+                                    </div>
+                                    <span class="hr-status <?= $sentStatusClass ?>">
+                                        <?= reqEscape($sentStatusText) ?>
+                                    </span>
+                                </div>
+                                <div class="hr-detail-grid">
+                                    <div class="hr-detail-item">
+                                        <span>Sent To Faculty</span>
+                                        <strong><?= reqEscape($sentRequest['alternate_faculty_name']) ?></strong>
+                                    </div>
+                                    <div class="hr-detail-item">
+                                        <span>Faculty Code</span>
+                                        <strong><?= reqEscape($sentRequest['alternate_faculty_code']) ?></strong>
+                                    </div>
+                                    <div class="hr-detail-item">
+                                        <span>Day / Period</span>
+                                        <strong><?= reqEscape($sentRequest['day']) ?> / P<?= (int)$sentRequest['period_id'] ?></strong>
+                                    </div>
+                                    <div class="hr-detail-item">
+                                        <span>Section ID</span>
+                                        <strong><?= (int)$sentRequest['section_id'] ?></strong>
+                                    </div>
+                                    <div class="hr-detail-item">
+                                        <span>Requested At</span>
+                                        <strong><?= reqEscape($sentRequest['requested_at']) ?></strong>
+                                    </div>
+                                    <div class="hr-detail-item">
+                                        <span>Responded At</span>
+                                        <strong><?= reqEscape($sentRequest['responded_at'] ?: 'Awaiting response') ?></strong>
+                                    </div>
+                                </div>
+                                <div class="hr-reason">
+                                    <strong>HANDOVER REASON</strong>
+                                    <p><?= nl2br(reqEscape($sentRequest['reason'])) ?></p>
+                                </div>
+                            </article>
+                        <?php endforeach; ?>
+                    <?php endif; ?>
+                </div>
             </section>
 
             <!-- RESPONSE MESSAGES -->
@@ -1120,7 +1377,38 @@ body.hr-page {
                     </span>
                 </div>
 
-                <div class="hr-request-list">
+                <!-- INCOMING REQUEST FILTERS (client-side, display only) -->
+                <div class="hr-filter-bar" aria-label="Filter incoming requests">
+                    <div class="hr-filter-field">
+                        <label for="incoming-status-filter">Status</label>
+                        <select id="incoming-status-filter">
+                            <option value="ALL">All statuses</option>
+                            <option value="PENDING">Pending</option>
+                            <option value="ACCEPTED">Accepted</option>
+                            <option value="REJECTED">Rejected</option>
+                            <option value="EXPIRED">Expired</option>
+                        </select>
+                    </div>
+                    <div class="hr-filter-field">
+                        <label for="incoming-search-filter">Search faculty / request</label>
+                        <input type="search" id="incoming-search-filter"
+                               placeholder="Faculty name, code, day, period or #" autocomplete="off">
+                    </div>
+                    <div class="hr-filter-field">
+                        <label for="incoming-date-filter">Request created on</label>
+                        <input type="date" id="incoming-date-filter" aria-label="Filter by request creation date">
+                    </div>
+                    <button type="button" class="hr-filter-reset" id="incoming-reset-filter">Clear filters</button>
+                </div>
+                <p class="hr-filter-meta" id="incoming-filter-count" role="status" aria-live="polite">
+                    Showing <?= $total ?> of <?= $total ?> incoming requests (summary cards show all requests).
+                </p>
+                <div class="hr-empty hr-filter-empty" id="incoming-no-matches" hidden>
+                    <h3>No matching requests</h3>
+                    <p>Try another status, faculty name, or date.</p>
+                </div>
+
+                <div class="hr-request-list" id="incoming-requests-list">
 
                     <?php if ($total === 0): ?>
 
@@ -1162,7 +1450,18 @@ body.hr-page {
                             ?>
 
                             <article class="hr-request-card"
-                                id="request-<?= (int)$request['request_id'] ?>">
+                                id="request-<?= (int)$request['request_id'] ?>"
+                                data-status="<?= reqEscape(strtoupper($status)) ?>"
+                                data-request-date="<?= reqEscape(substr((string)$request['requested_at'], 0, 10)) ?>"
+                                data-search="<?= reqEscape(implode(' ', [
+                                    $request['request_id'],
+                                    $request['original_faculty_name'],
+                                    $request['original_faculty_code'],
+                                    $request['day'],
+                                    'P' . $request['period_id'],
+                                    $request['section_id'],
+                                    $request['reason']
+                                ])) ?>">
 
                                 <div class="hr-request-header">
                                     <div>
@@ -1293,6 +1592,57 @@ body.hr-page {
 </div>
 
 <script>
+/* INDEPENDENT FILTERS FOR SENT AND INCOMING REQUESTS */
+(function () {
+    function attachRequestFilters(prefix) {
+        const list = document.getElementById(prefix + '-requests-list');
+        const statusControl = document.getElementById(prefix + '-status-filter');
+        const searchControl = document.getElementById(prefix + '-search-filter');
+        const dateControl = document.getElementById(prefix + '-date-filter');
+        const clearButton = document.getElementById(prefix + '-reset-filter');
+        const countText = document.getElementById(prefix + '-filter-count');
+        const noMatches = document.getElementById(prefix + '-no-matches');
+        if (!list || !statusControl || !searchControl || !dateControl || !clearButton || !countText || !noMatches) return;
+
+        const cards = Array.from(list.querySelectorAll('.hr-request-card'));
+        const label = prefix === 'sent' ? 'sent' : 'incoming';
+
+        function applyFilters() {
+            const status = statusControl.value;
+            const query = searchControl.value.trim().toLocaleLowerCase();
+            const date = dateControl.value;
+            let visible = 0;
+
+            for (const card of cards) {
+                const matchesStatus = status === 'ALL' || card.dataset.status === status;
+                const matchesSearch = !query || (card.dataset.search || '').toLocaleLowerCase().includes(query);
+                const matchesDate = !date || card.dataset.requestDate === date;
+                const show = matchesStatus && matchesSearch && matchesDate;
+                card.hidden = !show;
+                if (show) visible++;
+            }
+
+            countText.textContent = 'Showing ' + visible + ' of ' + cards.length + ' ' + label +
+                ' requests (summary cards show all requests).';
+            noMatches.hidden = cards.length === 0 || visible > 0;
+        }
+
+        statusControl.addEventListener('change', applyFilters);
+        searchControl.addEventListener('input', applyFilters);
+        dateControl.addEventListener('change', applyFilters);
+        clearButton.addEventListener('click', function () {
+            statusControl.value = 'ALL';
+            searchControl.value = '';
+            dateControl.value = '';
+            applyFilters();
+        });
+        applyFilters();
+    }
+
+    attachRequestFilters('sent');
+    attachRequestFilters('incoming');
+})();
+
 /* MOBILE SIDEBAR */
 
 (function () {

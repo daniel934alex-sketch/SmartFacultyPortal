@@ -11,6 +11,13 @@ if (
     exit;
 }
 
+require_once __DIR__ . '/../config/database.php';
+
+if (empty($_SESSION['csrf_token'])) {
+    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+}
+$csrfToken = $_SESSION['csrf_token'];
+
 $username = htmlspecialchars(
     (string)($_SESSION['username'] ?? 'Faculty'),
     ENT_QUOTES,
@@ -23,23 +30,35 @@ $initial = htmlspecialchars(
     'UTF-8'
 );
 
-$periods = [
-    1 => '08:30 AM - 09:15 AM',
-    2 => '09:15 AM - 10:00 AM',
-    3 => '10:00 AM - 10:45 AM',
-    4 => '11:00 AM - 11:45 AM',
-    5 => '11:45 AM - 12:30 PM',
-    6 => '12:30 PM - 01:15 PM',
-    7 => '02:00 PM - 02:45 PM',
-    8 => '02:45 PM - 03:30 PM',
-    9 => '03:45 PM - 04:30 PM',
-];
+$periods = [];
+$pQuery = $conn->query("SELECT period_id, start_time, end_time FROM periods ORDER BY period_id ASC");
+if ($pQuery && $pQuery->num_rows > 0) {
+    while ($pRow = $pQuery->fetch_assoc()) {
+        $pId = (int)$pRow['period_id'];
+        $start = date("h:i A", strtotime($pRow['start_time']));
+        $end = date("h:i A", strtotime($pRow['end_time']));
+        $periods[$pId] = "{$start} - {$end}";
+    }
+} else {
+    $periods = [
+        1 => '08:30 AM - 09:15 AM',
+        2 => '09:15 AM - 10:00 AM',
+        3 => '10:00 AM - 10:45 AM',
+        4 => '10:45 AM - 11:30 AM',
+        5 => '11:30 AM - 12:15 PM',
+        6 => '12:15 PM - 01:00 PM',
+        7 => '02:00 PM - 02:45 PM',
+        8 => '02:45 PM - 03:30 PM',
+        9 => '03:30 PM - 04:15 PM',
+    ];
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="csrf-token" content="<?= htmlspecialchars($csrfToken, ENT_QUOTES, 'UTF-8') ?>">
 <title>Faculty Availability | Smart Faculty</title>
 
 <style>
@@ -1196,6 +1215,8 @@ dateInput.addEventListener('change', () => {
 
         row.querySelector('.av-selected').textContent = '';
     });
+
+    loadSavedAvailability(dateInput.value);
 });
 
 /* MOBILE NAVIGATION */
@@ -1222,14 +1243,23 @@ dateInput.addEventListener('change', () => {
     });
 })();
 
+/* CSRF TOKEN */
+const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+
 /* SHARED POST REQUEST HELPER */
 
 async function postJson(endpoint, values) {
     const formData = new FormData();
 
     Object.entries(values).forEach(([key, value]) => {
-        formData.append(key, value);
+        if (value !== undefined && value !== null) {
+            formData.append(key, value);
+        }
     });
+
+    if (csrfToken && !formData.has('csrf_token')) {
+        formData.append('csrf_token', csrfToken);
+    }
 
     const response = await fetch(endpoint, {
         method: 'POST',
@@ -1241,10 +1271,32 @@ async function postJson(endpoint, values) {
     try {
         return JSON.parse(text);
     } catch (e) {
-        console.error('Invalid API response:', text);
+        console.error('Invalid API response (' + response.status + '):', text);
         throw new Error(
-            'Invalid server response. Check PHP server logs.'
+            'Invalid server response (HTTP ' + response.status + '). Check PHP server logs.'
         );
+    }
+}
+
+/* LOAD SAVED AVAILABILITY ON DATE SELECTION */
+
+async function loadSavedAvailability(date) {
+    if (!date) return;
+
+    try {
+        const response = await fetch('../api/availability.php?date=' + encodeURIComponent(date));
+        if (!response.ok) return;
+
+        const data = await response.json();
+        if (data.success && data.availability) {
+            Object.entries(data.availability).forEach(([pId, info]) => {
+                if (info && info.status) {
+                    showSelected(pId, info.status);
+                }
+            });
+        }
+    } catch (e) {
+        console.warn('Unable to load saved availability:', e);
     }
 }
 
@@ -1252,6 +1304,7 @@ async function postJson(endpoint, values) {
 
 function showSelected(periodId, status) {
     const row = $('period-' + periodId);
+    if (!row) return;
 
     row.querySelectorAll('button').forEach(btn => {
         btn.classList.remove('is-selected');
@@ -1263,7 +1316,10 @@ function showSelected(periodId, status) {
             ? 'av-cant'
             : 'av-leave';
 
-    row.querySelector('.' + cls).classList.add('is-selected');
+    const targetBtn = row.querySelector('.' + cls);
+    if (targetBtn) {
+        targetBtn.classList.add('is-selected');
+    }
 
     const labels = {
         AVAILABLE: 'Can attend',
@@ -1271,8 +1327,10 @@ function showSelected(periodId, status) {
         LEAVE: 'Leave'
     };
 
-    row.querySelector('.av-selected').textContent =
-        'Saved: ' + labels[status];
+    const selLabel = row.querySelector('.av-selected');
+    if (selLabel) {
+        selLabel.textContent = 'Saved: ' + (labels[status] || status);
+    }
 }
 
 /* SAVE AVAILABILITY */
@@ -1287,19 +1345,28 @@ async function setAvailability(periodId, status) {
 
     let reason = '';
 
-    if (status === 'UNAVAILABLE') {
-        reason = prompt("Why can't you attend this period?");
+    if (status === 'UNAVAILABLE' || status === 'LEAVE') {
+        const promptMsg = status === 'UNAVAILABLE'
+            ? "Why can't you attend this period? (Required)"
+            : "Please enter the reason for leave: (Required)";
 
-        if (reason === null || !reason.trim()) {
-            alert('Please provide a reason.');
+        const inputReason = prompt(promptMsg);
+
+        if (inputReason === null) {
+            // User cancelled prompt
             return;
         }
 
-        reason = reason.trim();
+        reason = inputReason.trim();
+
+        if (!reason) {
+            alert('Please provide a reason.');
+            return;
+        }
     }
 
     const row = $('period-' + periodId);
-    const buttons = [...row.querySelectorAll('button')];
+    const buttons = row ? [...row.querySelectorAll('button')] : [];
 
     buttons.forEach(btn => btn.disabled = true);
 
@@ -1324,11 +1391,12 @@ async function setAvailability(periodId, status) {
             'success'
         );
 
-        resetHandover();
         showSelected(periodId, status);
 
-        if (status === 'UNAVAILABLE') {
+        if (status === 'UNAVAILABLE' || status === 'LEAVE') {
             await checkClass(date, periodId);
+        } else {
+            resetHandover();
         }
 
     } catch (e) {
@@ -1366,11 +1434,11 @@ async function checkClass(date, periodId) {
         const fields = [
             ['Date', date],
             ['Day', data.day],
-            ['Timetable ID', c.timetable_id],
-            ['Period', c.period_id],
-            ['Section ID', c.section_id],
-            ['Subject ID', c.subject_id],
-            ['Classroom ID', c.classroom_id]
+            ['Period', 'Period ' + (c.period_id || periodId)],
+            ['Subject', (c.subject_name ? (c.subject_name + ' (' + (c.subject_code || '') + ')') : ('Subject ' + (c.subject_id ?? '')))],
+            ['Section', c.section_name ?? ('Section ' + (c.section_id ?? ''))],
+            ['Classroom', c.room_number ?? (c.classroom_id ? 'Room ' + c.classroom_id : 'N/A')],
+            ['Timetable ID', '#' + c.timetable_id]
         ];
 
         const details = $('classDetails');
@@ -1590,6 +1658,11 @@ async function sendHandoverRequest() {
         btn.disabled = false;
         btn.textContent = 'SEND HANDOVER REQUEST TO ALL';
     }
+}
+
+// Initial load of saved availability for the selected date
+if (dateInput && dateInput.value) {
+    loadSavedAvailability(dateInput.value);
 }
 </script>
 

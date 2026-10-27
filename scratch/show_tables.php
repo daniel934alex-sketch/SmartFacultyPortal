@@ -1,8 +1,6 @@
 <?php
-require_once "config/database.php";
-
-$res = $conn->query("SHOW TABLES");
-echo "--- ALL TABLES ---\n";
-while ($r = $res->fetch_row()) {
-    echo $r[0] . "\n";
+require_once __DIR__ . '/../config/database.php';
+$r = $conn->query('SHOW TABLES');
+while ($row = $r->fetch_array()) {
+    echo $row[0] . PHP_EOL;
 }

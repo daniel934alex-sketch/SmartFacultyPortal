@@ -893,6 +893,11 @@ body.av-page {
                 My Timetable
             </a>
 
+            <a href="mark-attendance.php">
+                <span class="av-nav-icon">✓</span>
+                Mark Attendance
+            </a>
+
             <a href="notifications.php">
                 <span class="av-nav-icon">♧</span>
                 Notifications

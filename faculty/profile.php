@@ -761,6 +761,13 @@ body.fp-page {
                 </svg>
                 My Timetable
             </a>
+            <a href="mark-attendance.php" class="fp-nav-link">
+                <svg viewBox="0 0 24 24">
+                   <rect x="4" y="3" width="16" height="18" rx="2"/>
+                   <path d="M8 8h8M8 12h8M8 16h5"/>
+                </svg>
+               Mark Attendance
+            </a>
 
             <a href="notifications.php" class="fp-nav-link">
                 <svg viewBox="0 0 24 24">

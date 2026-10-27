@@ -1069,6 +1069,14 @@ body.hr-page {
                 My Timetable
             </a>
 
+            <a href="mark-attendance.php" class="hr-nav-link">
+                <svg viewBox="0 0 24 24">
+                    <rect x="4" y="3" width="16" height="18" rx="2"/>
+                    <path d="M8 8h8M8 12h8M8 16h5"/>
+                </svg>
+                 Mark Attendance
+            </a>
+
             <a href="notifications.php" class="hr-nav-link">
                 <svg viewBox="0 0 24 24">
                     <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/>

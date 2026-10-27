@@ -1,6 +1,7 @@
 <?php
 session_start();
 require_once("../config/db.php");
+date_default_timezone_set("Asia/Kolkata");
 
 /* ---------- Faculty Login ---------- */
 if (
@@ -16,7 +17,12 @@ if (
 $faculty_id = (int)$_SESSION['faculty_id'];
 $username = $_SESSION['username'] ?? 'Faculty';
 
-$selected_date = $_GET['date'] ?? date('Y-m-d');
+/* ---------- Attendance Date (Server Asia/Kolkata) ---------- */
+// Always set to current date in server timezone Asia/Kolkata; do not trust browser input
+$selected_date = date('Y-m-d');
+$date_obj = new DateTime($selected_date);
+$valid_date = ($selected_date <= date('Y-m-d'));
+
 $period_id = isset($_GET['period_id']) ? (int)$_GET['period_id'] : 1;
 
 $message = '';
@@ -25,16 +31,6 @@ $timetable = null;
 $students = [];
 $existing_statuses = [];
 $periods = [];
-
-/* ---------- Validate Date ---------- */
-$date_obj = DateTime::createFromFormat('!Y-m-d', $selected_date);
-
-if (!$date_obj || $date_obj->format('Y-m-d') !== $selected_date) {
-    $selected_date = date('Y-m-d');
-    $date_obj = new DateTime($selected_date);
-}
-
-$valid_date = $selected_date <= date('Y-m-d');
 
 /* ---------- Load Periods ---------- */
 $period_result = $conn->query("
@@ -320,6 +316,11 @@ foreach ($students as $student) {
         .fd-dark .fa-field-control { display:block; width:100%; min-height:47px; padding:0 14px; border:1px solid #35455f; border-radius:10px; background:#111a2b; color:#f1f5ff; font:500 13px Inter,'Segoe UI',Arial,sans-serif; outline:none; color-scheme:dark; }
         .fd-dark .fa-field-control:focus { border-color:#9a83ff; box-shadow:0 0 0 3px rgba(154,131,255,.17); }
         .fd-dark .fa-field-control option { background:#111a2b; color:#f1f5ff; }
+        .fd-dark .fa-field-control[readonly],
+        .fd-dark .fa-field-readonly { background:#0f1726; color:#c5b7ff; border-color:#2b3952; cursor:default; user-select:none; }
+        .fd-dark .fa-field-control[readonly]:focus,
+        .fd-dark .fa-field-readonly:focus { border-color:#2b3952; box-shadow:none; outline:none; }
+        .fd-dark .fa-date-badge { display:inline-flex; align-items:center; padding:2px 7px; font-size:10px; font-weight:750; color:#9cf1c8; background:#17382d; border:1px solid #2d6350; border-radius:6px; margin-left:7px; letter-spacing:.5px; text-transform:uppercase; }
         .fd-dark .fa-button { display:inline-flex; justify-content:center; align-items:center; gap:9px; min-height:47px; padding:12px 19px; border:0; border-radius:10px; background:#b0a0ff; color:#211938; cursor:pointer; text-decoration:none; font-size:12px; font-weight:800; font-family:inherit; white-space:nowrap; transition:background .2s, transform .2s; }
         .fd-dark .fa-button:hover { background:#cec3ff; transform:translateY(-1px); }
         .fd-dark .fa-button:focus-visible { outline:3px solid #d9d0ff; outline-offset:3px; }
@@ -490,7 +491,7 @@ foreach ($students as $student) {
                 <div class="fd-hero-content">
                     <span class="fd-hero-eyebrow">FACULTY WORKSPACE / ATTENDANCE</span>
                     <h1>Attendance, made simple.</h1>
-                    <p>Pick a date and class period, review your student list, and record attendance in one place.</p>
+                    <p>Select a class period, review your student list, and record attendance in one place.</p>
                     <div class="fd-hero-actions">
                         <a class="fd-btn-primary" href="timetable.php">View My Timetable <span aria-hidden="true">→</span></a>
                         <a class="fd-btn-outline" href="dashboard.php">Back to Dashboard</a>
@@ -528,10 +529,10 @@ foreach ($students as $student) {
                     <?php endif; ?>
                     <form class="fa-filters" method="GET">
                         <div class="fa-field">
-                            <label class="fa-field-label" for="date"><span>01</span> Attendance Date</label>
-                            <input class="fa-field-control" type="date" id="date" name="date"
+                            <label class="fa-field-label" for="date"><span>01</span> Attendance Date <span class="fa-date-badge">Today (<?= htmlspecialchars($date_obj->format('d M Y'), ENT_QUOTES, 'UTF-8') ?>)</span></label>
+                            <input class="fa-field-control fa-field-readonly" type="text" id="date" name="date"
                                    value="<?= htmlspecialchars($selected_date, ENT_QUOTES, 'UTF-8') ?>"
-                                   max="<?= date('Y-m-d') ?>" required>
+                                   readonly aria-readonly="true" title="Attendance Date (Asia/Kolkata)">
                         </div>
                         <div class="fa-field">
                             <label class="fa-field-label" for="period_id"><span>02</span> Class Period</label>
@@ -550,7 +551,7 @@ foreach ($students as $student) {
                     </form>
                     <p class="fa-filter-note">
                         <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>
-                        Attendance can be recorded for today or an earlier date, for published classes only.
+                        Attendance is automatically set to today's date (<?= htmlspecialchars($date_obj->format('l, d M Y'), ENT_QUOTES, 'UTF-8') ?>) for published classes only.
                     </p>
                 </div>
             </section>

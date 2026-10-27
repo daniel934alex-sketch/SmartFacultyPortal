@@ -1,0 +1,55 @@
+Day,Period,Subject,Faculty,Classroom,Status,Section
+Monday,P1,OS,"Prof. Karthik Raj",39,DRAFT,CSE-D
+Monday,P2,MATHS,"Prof. Meena R",39,DRAFT,CSE-D
+Monday,P3,DBMS,"Prof. Priya Sharma",39,DRAFT,CSE-D
+Monday,P4,ADSA,"Prof. Naveen Kumar",39,DRAFT,CSE-D
+Monday,P5,KVD,"Prof. Vignesh M",39,DRAFT,CSE-D
+Monday,P6,QUANTS,"Prof. Ajay Kumar",39,DRAFT,CSE-D
+Monday,P7,ENG,"Prof. Rahul P",39,DRAFT,CSE-D
+Monday,P8,KVD-LAB,"Prof. Vignesh M","UNASSIGNED — lab capacity",DRAFT,CSE-D
+Monday,P9,OS-LAB,"Prof. Naveen Kumar","UNASSIGNED — lab capacity",DRAFT,CSE-D
+Tuesday,P1,MATHS,"Prof. Meena R",39,DRAFT,CSE-D
+Tuesday,P2,DBMS,"Prof. Priya Sharma",39,DRAFT,CSE-D
+Tuesday,P3,ADSA,"Prof. Naveen Kumar",39,DRAFT,CSE-D
+Tuesday,P4,KVD,"Prof. Vignesh M",39,DRAFT,CSE-D
+Tuesday,P5,QUANTS,"Prof. Ajay Kumar",39,DRAFT,CSE-D
+Tuesday,P6,ENG,"Prof. Rahul P",39,DRAFT,CSE-D
+Tuesday,P7,KVD-LAB,"Prof. Vignesh M","UNASSIGNED — lab capacity",DRAFT,CSE-D
+Tuesday,P8,OS-LAB,"Prof. Naveen Kumar","UNASSIGNED — lab capacity",DRAFT,CSE-D
+Tuesday,P9,OS,"Prof. Karthik Raj",39,DRAFT,CSE-D
+Wednesday,P1,DBMS,"Prof. Priya Sharma",39,DRAFT,CSE-D
+Wednesday,P2,ADSA,"Prof. Naveen Kumar",39,DRAFT,CSE-D
+Wednesday,P3,KVD,"Prof. Vignesh M",39,DRAFT,CSE-D
+Wednesday,P4,QUANTS,"Prof. Ajay Kumar",39,DRAFT,CSE-D
+Wednesday,P5,ENG,"Prof. Rahul P",39,DRAFT,CSE-D
+Wednesday,P6,KVD-LAB,"Prof. Vignesh M","UNASSIGNED — lab capacity",DRAFT,CSE-D
+Wednesday,P7,OS-LAB,"Prof. Naveen Kumar","UNASSIGNED — lab capacity",DRAFT,CSE-D
+Wednesday,P8,OS,"Prof. Karthik Raj",39,DRAFT,CSE-D
+Wednesday,P9,MATHS,"Prof. Sanjay R",39,DRAFT,CSE-D
+Thursday,P1,ADSA,"Prof. Naveen Kumar",39,DRAFT,CSE-D
+Thursday,P2,KVD,"Prof. Vignesh M",39,DRAFT,CSE-D
+Thursday,P3,QUANTS,"Prof. Ajay Kumar",39,DRAFT,CSE-D
+Thursday,P4,ENG,"Prof. Rahul P",39,DRAFT,CSE-D
+Thursday,P5,KVD-LAB,"Prof. Vignesh M","UNASSIGNED — lab capacity",DRAFT,CSE-D
+Thursday,P6,OS-LAB,"Prof. Naveen Kumar","UNASSIGNED — lab capacity",DRAFT,CSE-D
+Thursday,P7,OS,"Prof. Karthik Raj",39,DRAFT,CSE-D
+Thursday,P8,MATHS,"Prof. Sanjay R",39,DRAFT,CSE-D
+Thursday,P9,DBMS,"Prof. Rahul P",39,DRAFT,CSE-D
+Friday,P1,KVD,"Prof. Vignesh M",39,DRAFT,CSE-D
+Friday,P2,QUANTS,"Prof. Ajay Kumar",39,DRAFT,CSE-D
+Friday,P3,ENG,"Prof. Rahul P",39,DRAFT,CSE-D
+Friday,P4,KVD-LAB,"Prof. Vignesh M","UNASSIGNED — lab capacity",DRAFT,CSE-D
+Friday,P5,OS-LAB,"Prof. Naveen Kumar","UNASSIGNED — lab capacity",DRAFT,CSE-D
+Friday,P6,OS,"Prof. Karthik Raj",39,DRAFT,CSE-D
+Friday,P7,MATHS,"Prof. Sanjay R",39,DRAFT,CSE-D
+Friday,P8,DBMS,"Prof. Rahul P",39,DRAFT,CSE-D
+Friday,P9,ADSA,"Prof. Anitha S",39,DRAFT,CSE-D
+Saturday,P1,EE-PROJECT,"UNASSIGNED — supervisor capacity",39,DRAFT,CSE-D
+Saturday,P2,EE-PROJECT,"Prof. Sanjay R",39,DRAFT,CSE-D
+Saturday,P3,EE-PROJECT,"Prof. Meena R",39,DRAFT,CSE-D
+Saturday,P4,EE-PROJECT,"Dr. Arun Kumar",39,DRAFT,CSE-D
+Saturday,P5,EE-PROJECT,"UNASSIGNED — supervisor capacity",39,DRAFT,CSE-D
+Saturday,P6,EE-PROJECT,"UNASSIGNED — supervisor capacity",39,DRAFT,CSE-D
+Saturday,P7,EE-PROJECT,"Prof. Meena R",39,DRAFT,CSE-D
+Saturday,P8,EE-PROJECT,"Dr. Arun Kumar",39,DRAFT,CSE-D
+Saturday,P9,EE-PROJECT,"Prof. Sanjay R",39,DRAFT,CSE-D

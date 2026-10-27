@@ -2797,10 +2797,16 @@ if (!in_array($selectedDay, $days, true)) {
 
 
 
-                <div class="tt-header-tag">
-
-                    Published Schedule
-
+                <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+                    <div class="tt-header-tag">
+                        Published Schedule
+                    </div>
+                    <a href="../admin/timetable-download.php?section=<?= urlencode($sectionName) ?>&format=xlsx" style="display: inline-flex; align-items: center; gap: 6px; padding: 8px 14px; border-radius: 8px; font-size: 12px; font-weight: 700; text-decoration: none; background: #059669; color: #ffffff; transition: opacity 0.2s;" title="Download Class Timetable as Excel (.xlsx)">
+                        📊 Download Excel (.xlsx)
+                    </a>
+                    <a href="../admin/timetable-download.php?section=<?= urlencode($sectionName) ?>&format=csv" style="display: inline-flex; align-items: center; gap: 6px; padding: 8px 14px; border-radius: 8px; font-size: 12px; font-weight: 700; text-decoration: none; background: #1e293b; color: #cbd5e1; border: 1px solid #475569; transition: opacity 0.2s;" title="Download Class Timetable as CSV">
+                        📄 CSV
+                    </a>
                 </div>
 
 

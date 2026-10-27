@@ -40,6 +40,10 @@ $error = null;
 $previewRows = null;
 $fileMeta = null;
 $selectedSectionId = (int)($_POST['section_id'] ?? ($_GET['section_id'] ?? 0));
+$uploadMode = $_POST['upload_mode'] ?? ($_GET['mode'] ?? 'single');
+if ($uploadMode !== 'all') {
+    $uploadMode = 'single';
+}
 $conflictMode = $_POST['conflict_mode'] ?? 'replace'; // 'replace' or 'skip'
 $defaultStatus = $_POST['default_status'] ?? 'PUBLISHED';
 
@@ -51,7 +55,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     $submittedToken = $_POST['csrf_token'] ?? '';
     if (!hash_equals($_SESSION['csrf_token'], $submittedToken)) {
         $error = "Invalid session token. Please refresh the page and try again.";
-    } elseif ($selectedSectionId <= 0 || !isset($sections[$selectedSectionId])) {
+    } elseif ($uploadMode === 'single' && ($selectedSectionId <= 0 || !isset($sections[$selectedSectionId]))) {
         $error = "Please select a valid section for import.";
     } else {
         $submittedRows = $_POST['rows'] ?? [];
@@ -61,10 +65,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             // Begin Transaction
             $conn->begin_transaction();
             try {
-                $importedCount = 0;
-                $skippedCount = 0;
-                $replacedCount = 0;
-
                 // Prepared Statements
                 $checkExistingStmt = $conn->prepare("
                     SELECT timetable_id FROM timetable
@@ -105,100 +105,225 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                     $periodMapByNumber[(int)$p['period_number']] = $pId;
                 }
 
-                $seenSlots = [];
+                // Faculty-subject assignment map for validation
+                $facultySubjectMap = [];
+                $fsRes = $conn->query("SELECT faculty_id, subject_id FROM faculty_subjects");
+                if ($fsRes) {
+                    while ($fsRow = $fsRes->fetch_assoc()) {
+                        $facultySubjectMap[(int)$fsRow['faculty_id'] . '_' . (int)$fsRow['subject_id']] = true;
+                    }
+                }
 
-                foreach ($submittedRows as $row) {
-                    // Extract and sanitize
+                $seenSectionSlots = []; // "secId_day_pId" => rowIdx
+                $seenFacultySlots = []; // "facId_day_pId" => ['sec_name' => X, 'period_num' => Y, 'row_num' => Z]
+                $seenRoomSlots    = []; // "roomId_day_pId" => ['sec_name' => X, 'period_num' => Y, 'row_num' => Z]
+
+                $importedBySec = [];
+                $skippedBySec = [];
+                $replacedBySec = [];
+                foreach ($sections as $sId => $sec) {
+                    $importedBySec[$sId] = 0;
+                    $skippedBySec[$sId] = 0;
+                    $replacedBySec[$sId] = 0;
+                }
+
+                $totalImported = 0;
+                $totalSkipped = 0;
+                $totalReplaced = 0;
+
+                // Step A: Parse, sanitize, and validate internal batch consistency
+                $parsedRows = [];
+                $rowNum = 0;
+                foreach ($submittedRows as $rowKey => $row) {
+                    $rowNum++;
+                    $secId = ($uploadMode === 'all') ? (int)($row['section_id'] ?? 0) : $selectedSectionId;
+                    if ($secId <= 0 || !isset($sections[$secId])) {
+                        throw new Exception("Row #{$rowNum}: Invalid or unrecognized academic section selected.");
+                    }
+                    $secName = $sections[$secId]['section_name'];
+
                     $day = strtoupper(trim($row['day'] ?? ''));
-                    $periodNum = (int)($row['period_number'] ?? 0);
-                    $subjectId = (int)($row['subject_id'] ?? 0);
-                    $facultyId = (int)($row['faculty_id'] ?? 0);
-                    $classroomId = (int)($row['classroom_id'] ?? 0);
-                    $status = strtoupper(trim($row['status'] ?? 'PUBLISHED'));
-
                     if (!in_array($day, $validDays, true)) {
-                        throw new Exception("Invalid day specified: " . htmlspecialchars($day));
+                        throw new Exception("Row #{$rowNum} ({$secName}): Invalid day specified: " . htmlspecialchars($day));
                     }
 
+                    $periodNum = (int)($row['period_number'] ?? 0);
                     if (!isset($periodMapByNumber[$periodNum])) {
-                        throw new Exception("Invalid period number: P" . $periodNum);
+                        throw new Exception("Row #{$rowNum} ({$secName}): Invalid period number: P" . $periodNum);
                     }
                     $periodId = $periodMapByNumber[$periodNum];
 
-                    // Check for duplicate slot in same batch submission
-                    $slotKey = "{$day}_{$periodId}";
-                    if (isset($seenSlots[$slotKey])) {
-                        throw new Exception("Duplicate entry in submission for {$day} Period {$periodNum}. Each slot can only have one assigned class.");
-                    }
-                    $seenSlots[$slotKey] = true;
-
                     // Check existing timetable entry for this section
-                    $checkExistingStmt->bind_param("isi", $selectedSectionId, $day, $periodId);
+                    $checkExistingStmt->bind_param("isi", $secId, $day, $periodId);
                     $checkExistingStmt->execute();
                     $checkRes = $checkExistingStmt->get_result();
-                    $existingRow = $checkRes ? $checkRes->fetch_assoc() : null;
+                    $isExistingSlot = ($checkRes && $checkRes->num_rows > 0);
 
-                    if ($existingRow) {
-                        if ($conflictMode === 'skip') {
-                            // Slot is occupied and policy is skip -> safely skip this slot and leave existing DB record untouched
-                            $skippedCount++;
-                            continue;
-                        } else {
-                            // Policy is 'replace' -> delete the existing slot
-                            $deleteExistingStmt->bind_param("isi", $selectedSectionId, $day, $periodId);
-                            if (!$deleteExistingStmt->execute()) {
-                                throw new Exception("Failed to replace existing schedule slot for {$day} P{$periodNum}.");
-                            }
-                            $replacedCount++;
-                        }
+                    // Under 'skip' policy, if slot already exists in DB, it is safely bypassed
+                    if ($conflictMode === 'skip' && $isExistingSlot) {
+                        $parsedRows[] = [
+                            'rowNum' => $rowNum,
+                            'secId' => $secId,
+                            'secName' => $secName,
+                            'day' => $day,
+                            'periodNum' => $periodNum,
+                            'periodId' => $periodId,
+                            'subjectId' => 0,
+                            'facultyId' => 0,
+                            'classroomId' => 0,
+                            'status' => 'DRAFT',
+                            'isSkipped' => true,
+                            'isExisting' => true
+                        ];
+                        continue;
                     }
 
-                    // Validate foreign keys for entries that will be inserted
+                    $subjectId = (int)($row['subject_id'] ?? 0);
                     if (!isset($subjects[$subjectId])) {
-                        throw new Exception("Invalid subject selected for {$day} P{$periodNum}.");
+                        throw new Exception("Row #{$rowNum} ({$secName}): Please select a valid subject for {$day} P{$periodNum}.");
                     }
 
+                    $facultyId = (int)($row['faculty_id'] ?? 0);
                     if (!isset($faculty[$facultyId])) {
-                        throw new Exception("Invalid faculty selected for {$day} P{$periodNum}.");
+                        throw new Exception("Row #{$rowNum} ({$secName}): Please select a valid faculty for {$day} P{$periodNum}.");
                     }
 
+                    $classroomId = (int)($row['classroom_id'] ?? 0);
                     if (!isset($classrooms[$classroomId])) {
-                        throw new Exception("Invalid classroom selected for {$day} P{$periodNum}.");
+                        throw new Exception("Row #{$rowNum} ({$secName}): Please select a valid classroom for {$day} P{$periodNum}.");
                     }
 
+                    // Enforce faculty-subject mapping
+                    if (!empty($facultySubjectMap) && !isset($facultySubjectMap["{$facultyId}_{$subjectId}"])) {
+                        $fName = $faculty[$facultyId]['faculty_name'] ?? 'Faculty';
+                        $sCode = $subjects[$subjectId]['subject_code'] ?? 'Subject';
+                        throw new Exception("Row #{$rowNum} ({$secName}): {$fName} is not assigned to subject {$sCode} in faculty_subjects.");
+                    }
+
+                    $status = strtoupper(trim($row['status'] ?? 'PUBLISHED'));
                     if (!in_array($status, ['PUBLISHED', 'DRAFT'], true)) {
                         $status = 'PUBLISHED';
                     }
 
-                    // Check external collisions with other sections
+                    // Duplicate slot check within batch
+                    $slotKey = "{$secId}_{$day}_{$periodId}";
+                    if (isset($seenSectionSlots[$slotKey])) {
+                        $prevRow = $seenSectionSlots[$slotKey];
+                        throw new Exception("Duplicate entry in submission for {$secName} {$day} Period {$periodNum} (defined in Row #{$prevRow} and Row #{$rowNum}). Each slot can only have one assigned class.");
+                    }
+                    $seenSectionSlots[$slotKey] = $rowNum;
+
+                    // Faculty double-booking check within batch
+                    $facKey = "{$facultyId}_{$day}_{$periodId}";
+                    if (isset($seenFacultySlots[$facKey])) {
+                        $fPrev = $seenFacultySlots[$facKey];
+                        $fName = $faculty[$facultyId]['faculty_name'] ?? 'Faculty';
+                        throw new Exception("Faculty double-booking in submission: {$fName} is assigned to both {$fPrev['sec_name']} (Row #{$fPrev['row_num']}) and {$secName} (Row #{$rowNum}) on {$day} Period {$periodNum}.");
+                    }
+                    $seenFacultySlots[$facKey] = ['sec_name' => $secName, 'period_num' => $periodNum, 'row_num' => $rowNum];
+
+                    // Classroom double-booking check within batch
+                    $roomKey = "{$classroomId}_{$day}_{$periodId}";
+                    if (isset($seenRoomSlots[$roomKey])) {
+                        $rPrev = $seenRoomSlots[$roomKey];
+                        $rNum = $classrooms[$classroomId]['room_number'] ?? 'Room';
+                        throw new Exception("Classroom double-booking in submission: Room {$rNum} is assigned to both {$rPrev['sec_name']} (Row #{$rPrev['row_num']}) and {$secName} (Row #{$rowNum}) on {$day} Period {$periodNum}.");
+                    }
+                    $seenRoomSlots[$roomKey] = ['sec_name' => $secName, 'period_num' => $periodNum, 'row_num' => $rowNum];
+
+                    $parsedRows[] = [
+                        'rowNum' => $rowNum,
+                        'secId' => $secId,
+                        'secName' => $secName,
+                        'day' => $day,
+                        'periodNum' => $periodNum,
+                        'periodId' => $periodId,
+                        'subjectId' => $subjectId,
+                        'facultyId' => $facultyId,
+                        'classroomId' => $classroomId,
+                        'status' => $status,
+                        'isSkipped' => false,
+                        'isExisting' => $isExistingSlot
+                    ];
+                }
+
+                // Step B: Check existing DB entries & collisions, execute replacements/skips/inserts
+                foreach ($parsedRows as $pRow) {
+                    $secId = $pRow['secId'];
+                    $secName = $pRow['secName'];
+                    $day = $pRow['day'];
+                    $periodNum = $pRow['periodNum'];
+                    $periodId = $pRow['periodId'];
+                    $subjectId = $pRow['subjectId'];
+                    $facultyId = $pRow['facultyId'];
+                    $classroomId = $pRow['classroomId'];
+                    $status = $pRow['status'];
+
+                    if (!empty($pRow['isSkipped'])) {
+                        $totalSkipped++;
+                        if (isset($skippedBySec[$secId])) $skippedBySec[$secId]++;
+                        continue; // Skip this slot and leave existing DB record untouched
+                    }
+
+                    if (!empty($pRow['isExisting'])) {
+                        $deleteExistingStmt->bind_param("isi", $secId, $day, $periodId);
+                        if (!$deleteExistingStmt->execute()) {
+                            throw new Exception("Failed to replace existing schedule slot for {$secName} {$day} P{$periodNum}.");
+                        }
+                        $totalReplaced++;
+                        if (isset($replacedBySec[$secId])) $replacedBySec[$secId]++;
+                    }
+
+                    // Check external DB collisions with other sections (excluding any slots that are being replaced in this batch)
                     if ($checkFacultyCollisionStmt) {
-                        $checkFacultyCollisionStmt->bind_param("isii", $facultyId, $day, $periodId, $selectedSectionId);
+                        $checkFacultyCollisionStmt->bind_param("isii", $facultyId, $day, $periodId, $secId);
                         $checkFacultyCollisionStmt->execute();
                         $facColRes = $checkFacultyCollisionStmt->get_result();
                         if ($facColRes && $facColRes->num_rows > 0) {
                             $facCol = $facColRes->fetch_assoc();
-                            $facName = $faculty[$facultyId]['faculty_name'] ?? 'Faculty';
-                            throw new Exception("Collision: {$facName} is already assigned to Section {$facCol['section_name']} ({$facCol['subject_code']}) at {$day} P{$periodNum}.");
+                            $collidedSecId = 0;
+                            foreach ($sections as $sId => $s) {
+                                if ($s['section_name'] === $facCol['section_name']) {
+                                    $collidedSecId = $sId;
+                                    break;
+                                }
+                            }
+                            $isReplacedInBatch = ($conflictMode === 'replace' && isset($seenSectionSlots["{$collidedSecId}_{$day}_{$periodId}"]));
+                            if (!$isReplacedInBatch) {
+                                $facName = $faculty[$facultyId]['faculty_name'] ?? 'Faculty';
+                                throw new Exception("Collision with database: {$facName} is already assigned to {$facCol['section_name']} ({$facCol['subject_code']}) at {$day} P{$periodNum}.");
+                            }
                         }
                     }
 
                     if ($checkRoomCollisionStmt) {
-                        $checkRoomCollisionStmt->bind_param("isii", $classroomId, $day, $periodId, $selectedSectionId);
+                        $checkRoomCollisionStmt->bind_param("isii", $classroomId, $day, $periodId, $secId);
                         $checkRoomCollisionStmt->execute();
                         $roomColRes = $checkRoomCollisionStmt->get_result();
                         if ($roomColRes && $roomColRes->num_rows > 0) {
                             $roomCol = $roomColRes->fetch_assoc();
-                            $roomNum = $classrooms[$classroomId]['room_number'] ?? 'Room';
-                            throw new Exception("Collision: Room {$roomNum} is already assigned to Section {$roomCol['section_name']} at {$day} P{$periodNum}.");
+                            $collidedSecId = 0;
+                            foreach ($sections as $sId => $s) {
+                                if ($s['section_name'] === $roomCol['section_name']) {
+                                    $collidedSecId = $sId;
+                                    break;
+                                }
+                            }
+                            $isReplacedInBatch = ($conflictMode === 'replace' && isset($seenSectionSlots["{$collidedSecId}_{$day}_{$periodId}"]));
+                            if (!$isReplacedInBatch) {
+                                $roomNum = $classrooms[$classroomId]['room_number'] ?? 'Room';
+                                throw new Exception("Collision with database: Room {$roomNum} is already assigned to {$roomCol['section_name']} at {$day} P{$periodNum}.");
+                            }
                         }
                     }
 
-                    // Insert new valid timetable row
-                    $insertStmt->bind_param("siiiiis", $day, $periodId, $selectedSectionId, $subjectId, $facultyId, $classroomId, $status);
+                    // Insert timetable row
+                    $insertStmt->bind_param("siiiiis", $day, $periodId, $secId, $subjectId, $facultyId, $classroomId, $status);
                     if (!$insertStmt->execute()) {
-                        throw new Exception("Failed to insert timetable row for {$day} P{$periodNum}: " . $insertStmt->error);
+                        throw new Exception("Failed to insert timetable row for {$secName} {$day} P{$periodNum}: " . $insertStmt->error);
                     }
-                    $importedCount++;
+                    $totalImported++;
+                    if (isset($importedBySec[$secId])) $importedBySec[$secId]++;
                 }
 
                 $checkExistingStmt->close();
@@ -210,16 +335,39 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                 // Commit Transaction
                 $conn->commit();
 
-                $secName = $sections[$selectedSectionId]['section_name'] ?? "Section #{$selectedSectionId}";
-                $notice = [
-                    'type' => 'success',
-                    'title' => 'Timetable Import Successful!',
-                    'message' => "Successfully imported <strong>{$importedCount}</strong> timetable entries for <strong>{$secName}</strong>." .
-                                 ($replacedCount > 0 ? " (Replaced {$replacedCount} existing slots)" : "") .
-                                 ($skippedCount > 0 ? " ({$skippedCount} conflicting slots skipped)" : ""),
-                    'section_id' => $selectedSectionId,
-                    'section_name' => $secName
-                ];
+                if ($uploadMode === 'all') {
+                    $secBreakdownParts = [];
+                    foreach ($sections as $sId => $sec) {
+                        $name = $sec['section_name'];
+                        $imp = $importedBySec[$sId] ?? 0;
+                        $rep = $replacedBySec[$sId] ?? 0;
+                        $skp = $skippedBySec[$sId] ?? 0;
+                        $detail = "{$name}: {$imp} imported";
+                        if ($rep > 0) $detail .= ", {$rep} replaced";
+                        if ($skp > 0) $detail .= ", {$skp} skipped";
+                        $secBreakdownParts[] = "<strong>{$detail}</strong>";
+                    }
+                    $notice = [
+                        'type' => 'success',
+                        'title' => 'All Classes Timetable Import Successful!',
+                        'message' => "Successfully imported <strong>{$totalImported}</strong> timetable entries across all 5 sections.<br><span style='display:inline-block; margin-top: 6px; font-size: 13px; color: #a4f5d0;'>" . implode(" &bull; ", $secBreakdownParts) . "</span>" .
+                                     ($totalReplaced > 0 ? "<br>Total replaced existing slots: {$totalReplaced}" : "") .
+                                     ($totalSkipped > 0 ? "<br>Total skipped slots: {$totalSkipped}" : ""),
+                        'section_id' => 0,
+                        'section_name' => 'All Sections'
+                    ];
+                } else {
+                    $secName = $sections[$selectedSectionId]['section_name'] ?? "Section #{$selectedSectionId}";
+                    $notice = [
+                        'type' => 'success',
+                        'title' => 'Timetable Import Successful!',
+                        'message' => "Successfully imported <strong>{$totalImported}</strong> timetable entries for <strong>{$secName}</strong>." .
+                                     ($totalReplaced > 0 ? " (Replaced {$totalReplaced} existing slots)" : "") .
+                                     ($totalSkipped > 0 ? " ({$totalSkipped} conflicting slots skipped)" : ""),
+                        'section_id' => $selectedSectionId,
+                        'section_name' => $secName
+                    ];
+                }
                 // Reset preview
                 $previewRows = null;
             } catch (\Throwable $e) {
@@ -238,8 +386,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     $submittedToken = $_POST['csrf_token'] ?? '';
     if (!hash_equals($_SESSION['csrf_token'], $submittedToken)) {
         $error = "Session expired or invalid token. Please refresh and try again.";
-    } elseif ($selectedSectionId <= 0 || !isset($sections[$selectedSectionId])) {
-        $error = "Please select a target section from the dropdown.";
+    } elseif ($uploadMode === 'single' && ($selectedSectionId <= 0 || !isset($sections[$selectedSectionId]))) {
+        $error = "Please select a target section from the dropdown for Single Class Upload.";
     } elseif (!isset($_FILES['timetable_file']) || $_FILES['timetable_file']['error'] !== UPLOAD_ERR_OK) {
         $uploadError = $_FILES['timetable_file']['error'] ?? UPLOAD_ERR_NO_FILE;
         $errorMap = [
@@ -283,8 +431,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                 if (!move_uploaded_file($tmpPath, $destPath)) {
                     $error = "Failed to store uploaded file safely on the server.";
                 } else {
-                    // Parse file using TimetableParser with selected conflict policy
-                    $parseResult = $parser->parseFile($destPath, $ext, $selectedSectionId, $defaultStatus, $conflictMode);
+                    // Parse file using TimetableParser with selected conflict policy and upload mode
+                    $parseResult = $parser->parseFile(
+                        $destPath,
+                        $ext,
+                        ($uploadMode === 'all' ? 0 : $selectedSectionId),
+                        $defaultStatus,
+                        $conflictMode,
+                        $uploadMode
+                    );
 
                     // Delete the temp file now that parsing is complete
                     @unlink($destPath);
@@ -297,7 +452,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                             'original_name' => $origName,
                             'size' => $fileSize,
                             'format' => $parseResult['format'],
-                            'total_rows' => count($previewRows)
+                            'total_rows' => count($previewRows),
+                            'upload_mode' => $uploadMode
                         ];
                     }
                 }
@@ -993,6 +1149,308 @@ main.tt-upload-page {
         grid-template-columns: repeat(2, 1fr);
     }
 }
+/* Upload Mode Selector */
+.tt-mode-selector-wrap {
+    margin-bottom: 22px;
+}
+
+.tt-mode-section-label {
+    display: block;
+    font-size: 13px;
+    font-weight: 700;
+    color: #d0c5f0;
+    margin-bottom: 10px;
+}
+
+.tt-mode-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 14px;
+}
+
+.tt-mode-card {
+    position: relative;
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+    padding: 16px 20px;
+    background: rgba(23, 34, 53, 0.7);
+    border: 1.5px solid #2a364b;
+    border-radius: 14px;
+    cursor: pointer;
+    transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+    user-select: none;
+}
+
+.tt-mode-card:hover {
+    border-color: #5d4e9c;
+    background: rgba(35, 48, 72, 0.85);
+    transform: translateY(-1px);
+}
+
+.tt-mode-card.active {
+    border-color: #9a83ff;
+    background: linear-gradient(135deg, rgba(81, 71, 140, 0.32), rgba(23, 34, 53, 0.95));
+    box-shadow: 0 0 0 1px #9a83ff, 0 8px 24px rgba(154, 131, 255, 0.16);
+}
+
+.tt-mode-indicator {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    border: 2px solid #5a6b85;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    margin-top: 2px;
+    transition: all 0.2s ease;
+}
+
+.tt-mode-card.active .tt-mode-indicator {
+    border-color: #9a83ff;
+    background: #9a83ff;
+}
+
+.tt-mode-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #0c1220;
+    opacity: 0;
+    transform: scale(0.5);
+    transition: all 0.2s ease;
+}
+
+.tt-mode-card.active .tt-mode-dot {
+    opacity: 1;
+    transform: scale(1);
+}
+
+.tt-mode-title {
+    font-size: 14px;
+    font-weight: 750;
+    color: #ffffff;
+    margin-bottom: 4px;
+    display: flex;
+    align-items: center;
+}
+
+.tt-mode-card.active .tt-mode-title {
+    color: #d8cdfb;
+}
+
+.tt-mode-desc {
+    font-size: 12px;
+    color: #9bb0cd;
+    line-height: 1.45;
+}
+
+/* All Classes Notice */
+.tt-all-classes-notice {
+    padding: 16px 20px;
+    background: rgba(81, 71, 140, 0.15);
+    border: 1px solid #51478c;
+    border-radius: 12px;
+}
+
+.tt-all-classes-badges {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 6px;
+}
+
+.tt-sec-badge {
+    padding: 5px 12px;
+    background: #251f49;
+    border: 1px solid #6b58b4;
+    color: #dfd4ff;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 750;
+    letter-spacing: 0.3px;
+}
+
+/* Section Breakdown Cards (Preview Step) */
+.tt-sec-breakdown-card {
+    background: #172235;
+    border: 1px solid #2a364b;
+    border-radius: 16px;
+    padding: 22px 24px;
+    margin-bottom: 24px;
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.14);
+}
+
+.tt-sec-breakdown-card h3 {
+    margin: 0 0 4px;
+    color: #ffffff;
+    font-size: 16px;
+    font-weight: 800;
+}
+
+.tt-sec-breakdown-card p {
+    margin: 0 0 16px;
+    font-size: 12.5px;
+    color: #9bb0cd;
+}
+
+.tt-sec-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 12px;
+}
+
+.tt-sec-tile {
+    background: #111a2a;
+    border: 1px solid #2a364b;
+    border-radius: 12px;
+    padding: 14px 16px;
+    transition: all 0.2s ease;
+}
+
+.tt-sec-tile:hover {
+    border-color: #51478c;
+    background: #152033;
+}
+
+.tt-sec-tile.tile-has-error {
+    border-color: #ff5277;
+    background: rgba(255, 82, 119, 0.08);
+}
+
+.tt-sec-tile.tile-is-valid {
+    border-color: #274b3d;
+}
+
+.tt-sec-tile-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #222f44;
+}
+
+.tt-sec-tile-title {
+    font-size: 14px;
+    font-weight: 800;
+    color: #ffffff;
+}
+
+.tt-sec-tile-badge {
+    font-size: 10.5px;
+    font-weight: 750;
+    padding: 2px 7px;
+    border-radius: 4px;
+}
+
+.tt-sec-tile-badge.badge-valid {
+    background: rgba(62, 207, 142, 0.15);
+    color: #3ecf8e;
+    border: 1px solid rgba(62, 207, 142, 0.35);
+}
+
+.tt-sec-tile-badge.badge-error {
+    background: rgba(255, 82, 119, 0.18);
+    color: #ff6b8b;
+    border: 1px solid rgba(255, 82, 119, 0.4);
+}
+
+.tt-sec-tile-stats {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 6px;
+    font-size: 11.5px;
+    color: #9bb0cd;
+}
+
+.tt-sec-tile-stats span {
+    display: flex;
+    justify-content: space-between;
+}
+
+.tt-sec-tile-stats strong {
+    color: #ffffff;
+}
+
+/* Section Filter Bar */
+.tt-sec-filter-bar {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: center;
+    margin-bottom: 18px;
+    padding: 12px 16px;
+    background: #111a2a;
+    border-radius: 12px;
+    border: 1px solid #2a364b;
+}
+
+.tt-sec-filter-label {
+    font-size: 12px;
+    font-weight: 750;
+    color: #9bb0cd;
+    margin-right: 6px;
+}
+
+.tt-sec-tab {
+    padding: 6px 14px;
+    font-size: 12px;
+    font-weight: 700;
+    border-radius: 8px;
+    border: 1px solid #2a364b;
+    background: rgba(255, 255, 255, 0.04);
+    color: #c0d0ea;
+    cursor: pointer;
+    transition: all 0.18s ease;
+}
+
+.tt-sec-tab:hover {
+    background: rgba(255, 255, 255, 0.09);
+    color: #ffffff;
+    border-color: #556885;
+}
+
+.tt-sec-tab.active {
+    background: #9a83ff;
+    color: #0c1220;
+    border-color: #9a83ff;
+    box-shadow: 0 4px 12px rgba(154, 131, 255, 0.35);
+}
+
+/* Blocking Alert */
+.tt-blocking-alert {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+    padding: 16px 20px;
+    background: rgba(255, 82, 119, 0.12);
+    border: 1px solid #ff5277;
+    border-radius: 14px;
+    margin-bottom: 22px;
+    color: #ffb4c5;
+}
+
+.tt-blocking-alert svg {
+    color: #ff5277;
+    flex-shrink: 0;
+    margin-top: 2px;
+}
+
+.tt-blocking-alert h4 {
+    margin: 0 0 4px;
+    color: #ff6b8b;
+    font-size: 15px;
+    font-weight: 800;
+}
+
+.tt-blocking-alert p {
+    margin: 0;
+    font-size: 12.5px;
+    line-height: 1.5;
+    color: #fcd5de;
+}
 </style>
 
 <!-- Loading Spinner Overlay -->
@@ -1126,11 +1584,54 @@ main.tt-upload-page {
                     </div>
                 </div>
 
-                <!-- Settings: Section, Conflict Mode, Status -->
+                <!-- Settings: Upload Mode, Section, Conflict Mode, Status -->
+                <!-- 1. Upload Mode Selector (Above Target Section) -->
+                <div class="tt-mode-selector-wrap">
+                    <label class="tt-mode-section-label">Upload Mode <span style="color: #ff6b8b;">*</span></label>
+                    <div class="tt-mode-grid">
+                        <label class="tt-mode-card <?= $uploadMode === 'single' ? 'active' : '' ?>" id="mode-card-single" onclick="setUploadMode('single')">
+                            <input type="radio" name="upload_mode" value="single" id="mode_single" <?= $uploadMode === 'single' ? 'checked' : '' ?> style="position: absolute; opacity: 0; pointer-events: none;">
+                            <div class="tt-mode-indicator">
+                                <span class="tt-mode-dot"></span>
+                            </div>
+                            <div class="tt-mode-text">
+                                <div class="tt-mode-title">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px;">
+                                        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                                        <circle cx="9" cy="7" r="4"></circle>
+                                    </svg>
+                                    Single Class Upload
+                                </div>
+                                <div class="tt-mode-desc">Upload a timetable schedule for one specific section (current behavior)</div>
+                            </div>
+                        </label>
+
+                        <label class="tt-mode-card <?= $uploadMode === 'all' ? 'active' : '' ?>" id="mode-card-all" onclick="setUploadMode('all')">
+                            <input type="radio" name="upload_mode" value="all" id="mode_all" <?= $uploadMode === 'all' ? 'checked' : '' ?> style="position: absolute; opacity: 0; pointer-events: none;">
+                            <div class="tt-mode-indicator">
+                                <span class="tt-mode-dot"></span>
+                            </div>
+                            <div class="tt-mode-text">
+                                <div class="tt-mode-title">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px;">
+                                        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                                        <circle cx="9" cy="7" r="4"></circle>
+                                        <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+                                        <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+                                    </svg>
+                                    All Classes Upload (5 Sections)
+                                </div>
+                                <div class="tt-mode-desc">Upload one file containing entries for all 5 sections: CSE-A, CSE-B, CSE-C, CSE-D, and CSE-E</div>
+                            </div>
+                        </label>
+                    </div>
+                </div>
+
                 <div class="tt-upload-grid">
-                    <div class="tt-form-group">
+                    <!-- Target Section (for Single Class Upload) -->
+                    <div class="tt-form-group" id="section_id_group" style="<?= $uploadMode === 'all' ? 'display: none;' : '' ?>">
                         <label for="section_id">Target Section <span style="color: #ff6b8b;">*</span></label>
-                        <select name="section_id" id="section_id" required>
+                        <select name="section_id" id="section_id" <?= $uploadMode === 'single' ? 'required' : '' ?>>
                             <option value="">-- Choose Academic Section --</option>
                             <?php foreach ($sections as $sId => $sec): ?>
                                 <option value="<?= $sId ?>" <?= $selectedSectionId === $sId ? 'selected' : '' ?>>
@@ -1139,6 +1640,21 @@ main.tt-upload-page {
                             <?php endforeach; ?>
                         </select>
                         <small>Timetable slots will be assigned to this section.</small>
+                    </div>
+
+                    <!-- Notice (for All Classes Upload) -->
+                    <div class="tt-form-group tt-all-classes-notice" id="all-classes-notice" style="<?= $uploadMode === 'all' ? '' : 'display: none;' ?>">
+                        <label style="color: #d8cdfb; font-size: 13px; font-weight: 700; margin-bottom: 6px; display: block;">All 5 Target Sections</label>
+                        <div class="tt-all-classes-badges">
+                            <span class="tt-sec-badge">CSE-A</span>
+                            <span class="tt-sec-badge">CSE-B</span>
+                            <span class="tt-sec-badge">CSE-C</span>
+                            <span class="tt-sec-badge">CSE-D</span>
+                            <span class="tt-sec-badge">CSE-E</span>
+                        </div>
+                        <small style="color: #a5b5d1; display: block; margin-top: 8px;">
+                            Sections are automatically identified per row or spreadsheet sheet.
+                        </small>
                     </div>
 
                     <div class="tt-form-group">
@@ -1195,22 +1711,24 @@ main.tt-upload-page {
                     </div>
                 </div>
                 <div class="tt-template-links">
-                    <a href="timetable-template.php?format=csv" class="tt-btn-outline" download>
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                            <polyline points="7 10 12 15 17 10"></polyline>
-                            <line x1="12" y1="15" x2="12" y2="3"></line>
-                        </svg>
-                        Download CSV (.csv)
-                    </a>
-                    <a href="timetable-template.php?format=xlsx" class="tt-btn-outline" download>
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                            <polyline points="7 10 12 15 17 10"></polyline>
-                            <line x1="12" y1="15" x2="12" y2="3"></line>
-                        </svg>
-                        Download Excel (.xlsx)
-                    </a>
+                    <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                        <span style="font-size: 11px; color: #a5b5d1; font-weight: 700;">Single Class:</span>
+                        <a href="timetable-template.php?format=csv" class="tt-btn-outline" download>
+                            CSV (.csv)
+                        </a>
+                        <a href="timetable-template.php?format=xlsx" class="tt-btn-outline" download>
+                            Excel (.xlsx)
+                        </a>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                        <span style="font-size: 11px; color: #c4b5f8; font-weight: 700;">All 5 Classes:</span>
+                        <a href="timetable-template.php?format=csv&mode=all" class="tt-btn-outline" style="border-color: #7b62cc; color: #dfd4ff;" download>
+                            5-Class CSV (.csv)
+                        </a>
+                        <a href="timetable-template.php?format=xlsx&mode=all" class="tt-btn-outline" style="border-color: #7b62cc; color: #dfd4ff;" download>
+                            5-Class Excel (.xlsx)
+                        </a>
+                    </div>
                 </div>
             </div>
         </div>
@@ -1226,59 +1744,151 @@ main.tt-upload-page {
         $countWarnings = 0;
         $countErrors = 0;
 
+        $sectionStats = [];
+        foreach ($sections as $sId => $sec) {
+            $sectionStats[$sId] = [
+                'id' => $sId,
+                'name' => $sec['section_name'],
+                'total' => 0,
+                'ready' => 0,
+                'skipped' => 0,
+                'warnings' => 0,
+                'errors' => 0
+            ];
+        }
+
         foreach ($previewRows as $r) {
             $hasError = !empty($r['errors']);
             $hasExisting = !empty($r['conflict']) && in_array($r['conflict']['type'] ?? '', ['existing_entry_skip', 'existing_entry_replace'], true);
             $hasWarning = !empty($r['warnings']) || ($r['subject_id'] === 0 || $r['faculty_id'] === 0 || $r['classroom_id'] === 0);
 
+            $secId = (int)($r['section_id'] > 0 ? $r['section_id'] : $selectedSectionId);
+            if (!isset($sectionStats[$secId])) {
+                $sectionStats[$secId] = [
+                    'id' => $secId,
+                    'name' => $r['raw_section'] ?: ($secId > 0 ? "Sec #{$secId}" : "Unknown Section"),
+                    'total' => 0,
+                    'ready' => 0,
+                    'skipped' => 0,
+                    'warnings' => 0,
+                    'errors' => 0
+                ];
+            }
+            $sectionStats[$secId]['total']++;
+
             if ($hasError) {
                 $countErrors++;
+                $sectionStats[$secId]['errors']++;
             } elseif ($conflictMode === 'skip' && $hasExisting) {
                 $countSkipped++;
+                $sectionStats[$secId]['skipped']++;
             } elseif ($conflictMode === 'replace' && $hasExisting) {
                 $countWarnings++; // notice: slot will be replaced
+                $sectionStats[$secId]['warnings']++;
                 if (!$hasWarning) {
                     $countReady++;
+                    $sectionStats[$secId]['ready']++;
                 }
             } else {
                 if ($hasWarning) {
                     $countWarnings++;
+                    $sectionStats[$secId]['warnings']++;
                 }
                 if (!$hasWarning) {
                     $countReady++;
+                    $sectionStats[$secId]['ready']++;
                 }
             }
         }
-        $targetSectionName = $sections[$selectedSectionId]['section_name'] ?? "Section #{$selectedSectionId}";
+        $targetSectionName = ($uploadMode === 'all') ? "All 5 Sections (CSE-A to CSE-E)" : ($sections[$selectedSectionId]['section_name'] ?? "Section #{$selectedSectionId}");
         ?>
 
-        <!-- KPI SUMMARY TILES -->
+        <!-- KPI SUMMARY TILES (COMBINED TOTALS) -->
         <div class="tt-kpi-grid">
             <div class="tt-kpi-card kpi-total">
-                <span class="tt-kpi-label">Total Extracted</span>
+                <span class="tt-kpi-label"><?= $uploadMode === 'all' ? 'Combined Extracted' : 'Total Extracted' ?></span>
                 <div class="tt-kpi-val" id="kpi-total-val"><?= $totalExtracted ?></div>
             </div>
             <div class="tt-kpi-card kpi-ready">
-                <span class="tt-kpi-label">Ready to Import</span>
+                <span class="tt-kpi-label"><?= $uploadMode === 'all' ? 'Combined Ready' : 'Ready to Import' ?></span>
                 <div class="tt-kpi-val" id="kpi-ready-val" style="color: #3ecf8e;"><?= $countReady ?></div>
             </div>
             <div class="tt-kpi-card kpi-skipped">
-                <span class="tt-kpi-label">Skipped (Occupied)</span>
+                <span class="tt-kpi-label"><?= $uploadMode === 'all' ? 'Combined Skipped' : 'Skipped (Occupied)' ?></span>
                 <div class="tt-kpi-val" id="kpi-skipped-val" style="color: #38bdf8;"><?= $countSkipped ?></div>
             </div>
             <div class="tt-kpi-card kpi-warning">
-                <span class="tt-kpi-label">Warnings / Notices</span>
+                <span class="tt-kpi-label"><?= $uploadMode === 'all' ? 'Combined Warnings' : 'Warnings / Notices' ?></span>
                 <div class="tt-kpi-val" id="kpi-warning-val" style="color: #f5a623;"><?= $countWarnings ?></div>
             </div>
             <div class="tt-kpi-card kpi-error">
-                <span class="tt-kpi-label">Blocking Errors</span>
+                <span class="tt-kpi-label"><?= $uploadMode === 'all' ? 'Combined Errors' : 'Blocking Errors' ?></span>
                 <div class="tt-kpi-val" id="kpi-error-val" style="color: #ff5277;"><?= $countErrors ?></div>
             </div>
         </div>
 
+        <!-- SECTION BREAKDOWN CARD (FOR ALL CLASSES MODE) -->
+        <?php if ($uploadMode === 'all'): ?>
+            <div class="tt-sec-breakdown-card">
+                <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+                    <div>
+                        <h3>Academic Section Breakdown (5 Classes)</h3>
+                        <p>Summary of extracted timetable slots grouped by academic section for CSE-A through CSE-E.</p>
+                    </div>
+                    <div>
+                        <span class="tt-badge <?= $countErrors > 0 ? 'tt-badge-danger' : 'tt-badge-success' ?>">
+                            <?= $countErrors > 0 ? "⛔ {$countErrors} Conflict Error(s) in Batch" : "✓ All 5 Sections Validated" ?>
+                        </span>
+                    </div>
+                </div>
+
+                <div class="tt-sec-grid">
+                    <?php foreach ($sections as $sId => $sec): ?>
+                        <?php
+                        $st = $sectionStats[$sId] ?? ['total' => 0, 'ready' => 0, 'skipped' => 0, 'warnings' => 0, 'errors' => 0];
+                        $secHasError = $st['errors'] > 0;
+                        ?>
+                        <div class="tt-sec-tile <?= $secHasError ? 'tile-has-error' : 'tile-is-valid' ?>" id="sec-tile-<?= $sId ?>">
+                            <div class="tt-sec-tile-header">
+                                <span class="tt-sec-tile-title"><?= htmlspecialchars($sec['section_name'], ENT_QUOTES, 'UTF-8') ?></span>
+                                <span class="tt-sec-tile-badge <?= $secHasError ? 'badge-error' : 'badge-valid' ?>" id="sec-badge-<?= $sId ?>">
+                                    <?= $secHasError ? "{$st['errors']} Error" : ($st['total'] > 0 ? "{$st['ready']} Ready" : "0 Entries") ?>
+                                </span>
+                            </div>
+                            <div class="tt-sec-tile-stats">
+                                <span>Total: <strong id="sec-stat-total-<?= $sId ?>"><?= $st['total'] ?></strong></span>
+                                <span>Ready: <strong id="sec-stat-ready-<?= $sId ?>" style="color: #3ecf8e;"><?= $st['ready'] ?></strong></span>
+                                <span>Skipped: <strong id="sec-stat-skipped-<?= $sId ?>" style="color: #38bdf8;"><?= $st['skipped'] ?></strong></span>
+                                <span>Warn/Err: <strong id="sec-stat-issues-<?= $sId ?>" style="color: <?= ($st['warnings'] + $st['errors'] > 0) ? '#ff5277' : '#9bb0cd' ?>;"><?= $st['warnings'] + $st['errors'] ?></strong></span>
+                            </div>
+                        </div>
+                    <?php endforeach; ?>
+                </div>
+            </div>
+        <?php endif; ?>
+
+        <!-- BLOCKING CONFLICT ALERT -->
+        <?php if ($countErrors > 0): ?>
+            <div class="tt-blocking-alert" id="tt-blocking-alert">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <line x1="12" y1="8" x2="12" y2="12"></line>
+                    <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                </svg>
+                <div>
+                    <h4>Blocking Conflicts Detected (<?= $countErrors ?>)</h4>
+                    <p>
+                        Import is locked to protect timetable integrity. The file contains duplicate section slots, cross-section double-bookings, or invalid entries.
+                        Review the highlighted red rows below to reassign periods, subjects, faculty, classrooms, or use <strong>✕</strong> to remove invalid rows before importing.
+                    </p>
+                </div>
+            </div>
+        <?php endif; ?>
+
         <form method="POST" id="tt-confirm-form" onsubmit="return validateBeforeConfirm();">
             <input type="hidden" name="action" value="confirm_import">
             <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrfToken, ENT_QUOTES, 'UTF-8') ?>">
+            <input type="hidden" name="upload_mode" value="<?= htmlspecialchars($uploadMode, ENT_QUOTES, 'UTF-8') ?>">
             <input type="hidden" name="section_id" value="<?= $selectedSectionId ?>">
             <input type="hidden" name="conflict_mode" id="conflict_mode_input" value="<?= htmlspecialchars($conflictMode, ENT_QUOTES, 'UTF-8') ?>">
             <input type="hidden" name="default_status" value="<?= htmlspecialchars($defaultStatus, ENT_QUOTES, 'UTF-8') ?>">
@@ -1315,12 +1925,31 @@ main.tt-upload-page {
                     Review the extracted timetable below. You can switch the conflict policy, correct unmatched subjects, faculty, or classrooms directly using dropdowns before confirming the import.
                 </p>
 
+                <!-- SECTION FILTER TABS (FOR ALL CLASSES MODE) -->
+                <?php if ($uploadMode === 'all'): ?>
+                    <div class="tt-sec-filter-bar">
+                        <span class="tt-sec-filter-label">Filter View by Section:</span>
+                        <button type="button" class="tt-sec-tab active" data-filter="all" onclick="filterSection('all', this)">
+                            All Sections (<?= $totalExtracted ?>)
+                        </button>
+                        <?php foreach ($sections as $sId => $sec): ?>
+                            <?php $sCount = $sectionStats[$sId]['total'] ?? 0; ?>
+                            <button type="button" class="tt-sec-tab" data-filter="<?= htmlspecialchars($sec['section_name'], ENT_QUOTES, 'UTF-8') ?>" onclick="filterSection('<?= htmlspecialchars($sec['section_name'], ENT_QUOTES, 'UTF-8') ?>', this)">
+                                <?= htmlspecialchars($sec['section_name'], ENT_QUOTES, 'UTF-8') ?> (<?= $sCount ?>)
+                            </button>
+                        <?php endforeach; ?>
+                    </div>
+                <?php endif; ?>
+
                 <!-- EDITABLE TABLE -->
                 <div class="tt-table-container">
                     <table class="tt-preview-table" id="tt-preview-table">
                         <thead>
                             <tr>
                                 <th style="width: 40px; text-align: center;">#</th>
+                                <?php if ($uploadMode === 'all'): ?>
+                                    <th style="width: 130px;">Section</th>
+                                <?php endif; ?>
                                 <th style="width: 120px;">Day</th>
                                 <th style="width: 130px;">Period</th>
                                 <th style="width: 170px;">Time</th>
@@ -1335,6 +1964,8 @@ main.tt-upload-page {
                         <tbody id="tt-table-body">
                             <?php foreach ($previewRows as $idx => $r): ?>
                                 <?php
+                                $rSecId = (int)($r['section_id'] > 0 ? $r['section_id'] : $selectedSectionId);
+                                $rSecName = $sections[$rSecId]['section_name'] ?? ($r['raw_section'] ?: "CSE-A");
                                 $hasError = !empty($r['errors']);
                                 $hasWarning = !empty($r['warnings']) || ($r['subject_id'] === 0 || $r['faculty_id'] === 0 || $r['classroom_id'] === 0);
                                 $hasConflict = !empty($r['conflict']);
@@ -1368,6 +1999,8 @@ main.tt-upload-page {
                                 <tr class="<?= $rowClass ?>" 
                                     id="preview-row-<?= $idx ?>"
                                     data-row-index="<?= $idx ?>"
+                                    data-section-id="<?= $rSecId ?>"
+                                    data-section-name="<?= htmlspecialchars($rSecName, ENT_QUOTES, 'UTF-8') ?>"
                                     data-has-error="<?= $hasError ? '1' : '0' ?>"
                                     data-has-existing="<?= $isExisting ? '1' : '0' ?>"
                                     data-has-warning="<?= $hasWarning ? '1' : '0' ?>"
@@ -1378,9 +2011,27 @@ main.tt-upload-page {
                                         <?= $idx + 1 ?>
                                     </td>
 
+                                    <?php if ($uploadMode === 'all'): ?>
+                                        <!-- Section Selector -->
+                                        <td>
+                                            <select name="rows[<?= $idx ?>][section_id]" class="tt-select-compact <?= $r['section_id'] === 0 ? 'field-unmatched' : '' ?>" onchange="onRowSectionChange(<?= $idx ?>, this)" required>
+                                                <?php if ($r['section_id'] === 0): ?>
+                                                    <option value="" selected>-- Unmatched: "<?= htmlspecialchars($r['raw_section'] ?? '', ENT_QUOTES, 'UTF-8') ?>" --</option>
+                                                <?php endif; ?>
+                                                <?php foreach ($sections as $sId => $sec): ?>
+                                                    <option value="<?= $sId ?>" <?= $rSecId === $sId ? 'selected' : '' ?>>
+                                                        <?= htmlspecialchars($sec['section_name'], ENT_QUOTES, 'UTF-8') ?>
+                                                    </option>
+                                                <?php endforeach; ?>
+                                            </select>
+                                        </td>
+                                    <?php else: ?>
+                                        <input type="hidden" name="rows[<?= $idx ?>][section_id]" value="<?= $selectedSectionId ?>">
+                                    <?php endif; ?>
+
                                     <!-- Day -->
                                     <td>
-                                        <select name="rows[<?= $idx ?>][day]" class="tt-select-compact" required>
+                                        <select name="rows[<?= $idx ?>][day]" class="tt-select-compact" onchange="recalculateKPIs()" required>
                                             <?php foreach ($validDays as $d): ?>
                                                 <option value="<?= $d ?>" <?= $r['day'] === $d ? 'selected' : '' ?>>
                                                     <?= $d ?>
@@ -1391,7 +2042,7 @@ main.tt-upload-page {
 
                                     <!-- Period -->
                                     <td>
-                                        <select name="rows[<?= $idx ?>][period_number]" class="tt-select-compact" onchange="updateRowTime(this, <?= $idx ?>)" required>
+                                        <select name="rows[<?= $idx ?>][period_number]" class="tt-select-compact" onchange="updateRowTime(this, <?= $idx ?>); recalculateKPIs();" required>
                                             <option value="">-- Period --</option>
                                             <?php for ($pNum = 1; $pNum <= 9; $pNum++): ?>
                                                 <option value="<?= $pNum ?>" <?= (int)$r['period_number'] === $pNum ? 'selected' : '' ?>>
@@ -1405,9 +2056,9 @@ main.tt-upload-page {
                                     <td>
                                         <span id="row-time-<?= $idx ?>" style="font-size: 12px; color: #b7c7e0;">
                                             <?php
-                                            $st = $r['start_time'] ? date("h:i A", strtotime($r['start_time'])) : '—';
-                                            $et = $r['end_time'] ? date("h:i A", strtotime($r['end_time'])) : '—';
-                                            echo "{$st} – {$et}";
+                                             $st = $r['start_time'] ? date("h:i A", strtotime($r['start_time'])) : '—';
+                                             $et = $r['end_time'] ? date("h:i A", strtotime($r['end_time'])) : '—';
+                                             echo "{$st} – {$et}";
                                             ?>
                                         </span>
                                     </td>
@@ -1462,7 +2113,7 @@ main.tt-upload-page {
 
                                     <!-- Status -->
                                     <td>
-                                        <select name="rows[<?= $idx ?>][status]" class="tt-select-compact">
+                                        <select name="rows[<?= $idx ?>][status]" class="tt-select-compact" onchange="recalculateKPIs()">
                                             <option value="PUBLISHED" <?= $r['status'] === 'PUBLISHED' ? 'selected' : '' ?>>PUBLISHED</option>
                                             <option value="DRAFT" <?= $r['status'] === 'DRAFT' ? 'selected' : '' ?>>DRAFT</option>
                                         </select>
@@ -1528,7 +2179,7 @@ main.tt-upload-page {
                         </a>
                     </div>
                     <div class="tt-actions-right">
-                        <button type="submit" class="btn-primary-gradient" id="btn-confirm-import">
+                        <button type="submit" class="btn-primary-gradient" id="btn-confirm-import" <?= $countErrors > 0 ? 'disabled style="opacity: 0.55; cursor: not-allowed;" title="Cannot import while blocking errors exist"' : '' ?>>
                             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                 <polyline points="20 6 9 17 4 12"></polyline>
                             </svg>
@@ -1541,6 +2192,72 @@ main.tt-upload-page {
     <?php endif; ?>
 
 </main>
+
+<?php
+// Build compact references for reactive client-side collision validation
+$dbBookings = [
+    'faculty' => [],
+    'rooms' => [],
+    'sections' => []
+];
+$exRes = $conn->query("
+    SELECT t.timetable_id, t.section_id, sec.section_name, t.day, p.period_number, 
+           t.subject_id, s.subject_code, t.faculty_id, f.faculty_name, 
+           t.classroom_id, c.room_number, t.status
+    FROM timetable t
+    JOIN sections sec ON sec.section_id = t.section_id
+    JOIN periods p ON p.period_id = t.period_id
+    JOIN subjects s ON s.subject_id = t.subject_id
+    JOIN faculty f ON f.faculty_id = t.faculty_id
+    JOIN classrooms c ON c.classroom_id = t.classroom_id
+");
+if ($exRes) {
+    while ($er = $exRes->fetch_assoc()) {
+        $d = strtoupper($er['day']);
+        $p = (int)$er['period_number'];
+        $sId = (int)$er['section_id'];
+        $fId = (int)$er['faculty_id'];
+        $cId = (int)$er['classroom_id'];
+        $dbBookings['faculty']["{$fId}_{$d}_{$p}"] = [
+            'sec_id' => $sId,
+            'sec_name' => $er['section_name'],
+            'sub_code' => $er['subject_code']
+        ];
+        $dbBookings['rooms']["{$cId}_{$d}_{$p}"] = [
+            'sec_id' => $sId,
+            'sec_name' => $er['section_name'],
+            'sub_code' => $er['subject_code']
+        ];
+        $dbBookings['sections']["{$sId}_{$d}_{$p}"] = [
+            'sub_code' => $er['subject_code'],
+            'fac_name' => $er['faculty_name'],
+            'room_num' => $er['room_number'],
+            'status' => $er['status']
+        ];
+    }
+}
+
+$clientFacultySubjectMap = [];
+$fsRes = $conn->query("SELECT faculty_id, subject_id FROM faculty_subjects");
+if ($fsRes) {
+    while ($fsRow = $fsRes->fetch_assoc()) {
+        $clientFacultySubjectMap[(int)$fsRow['faculty_id'] . '_' . (int)$fsRow['subject_id']] = true;
+    }
+}
+
+$clientFacultyData = [];
+foreach ($faculty as $fId => $f) {
+    $clientFacultyData[$fId] = $f['faculty_name'];
+}
+$clientClassroomsData = [];
+foreach ($classrooms as $cId => $c) {
+    $clientClassroomsData[$cId] = $c['room_number'];
+}
+$clientSubjectsData = [];
+foreach ($subjects as $sId => $s) {
+    $clientSubjectsData[$sId] = $s['subject_code'];
+}
+?>
 
 <script>
 // Times mapped by period number for instant UI reflection
@@ -1555,6 +2272,77 @@ const periodTimes = {
     8: "02:45 PM – 03:30 PM",
     9: "03:45 PM – 04:30 PM"
 };
+
+// Reference data for reactive validation
+const sectionsData = <?= json_encode(array_values(array_map(function($s) {
+    return ['id' => (int)$s['section_id'], 'name' => $s['section_name']];
+}, $sections))) ?>;
+
+const dbBookings = <?= json_encode($dbBookings) ?>;
+const facultySubjectsMap = <?= json_encode($clientFacultySubjectMap) ?>;
+const facultyNames = <?= json_encode($clientFacultyData) ?>;
+const classroomNames = <?= json_encode($clientClassroomsData) ?>;
+const subjectCodes = <?= json_encode($clientSubjectsData) ?>;
+const defaultTargetSecId = <?= (int)$selectedSectionId ?>;
+const isAllClassesMode = <?= ($uploadMode === 'all') ? 'true' : 'false' ?>;
+
+// Upload Mode Switcher (Step 1)
+function setUploadMode(mode) {
+    const radioSingle = document.getElementById('mode_single');
+    const radioAll = document.getElementById('mode_all');
+    const cardSingle = document.getElementById('mode-card-single');
+    const cardAll = document.getElementById('mode-card-all');
+    const secGroup = document.getElementById('section_id_group');
+    const secSelect = document.getElementById('section_id');
+    const allNotice = document.getElementById('all-classes-notice');
+
+    if (mode === 'all') {
+        if (radioAll) radioAll.checked = true;
+        if (cardAll) cardAll.classList.add('active');
+        if (cardSingle) cardSingle.classList.remove('active');
+        if (secGroup) secGroup.style.display = 'none';
+        if (secSelect) {
+            secSelect.removeAttribute('required');
+            secSelect.disabled = true;
+        }
+        if (allNotice) allNotice.style.display = 'block';
+    } else {
+        if (radioSingle) radioSingle.checked = true;
+        if (cardSingle) cardSingle.classList.add('active');
+        if (cardAll) cardAll.classList.remove('active');
+        if (secGroup) secGroup.style.display = 'block';
+        if (secSelect) {
+            secSelect.setAttribute('required', 'required');
+            secSelect.disabled = false;
+        }
+        if (allNotice) allNotice.style.display = 'none';
+    }
+}
+
+// Section Filter Bar (Step 2)
+function filterSection(secName, btn) {
+    document.querySelectorAll('.tt-sec-tab').forEach(t => t.classList.remove('active'));
+    if (btn) btn.classList.add('active');
+
+    const rows = document.querySelectorAll('#tt-table-body tr');
+    rows.forEach(tr => {
+        const rowSec = tr.getAttribute('data-section-name');
+        if (secName === 'all' || rowSec === secName) {
+            tr.style.display = '';
+        } else {
+            tr.style.display = 'none';
+        }
+    });
+}
+
+function onRowSectionChange(rowIndex, selectElem) {
+    const tr = document.getElementById('preview-row-' + rowIndex);
+    if (!tr) return;
+    const optText = selectElem.options[selectElem.selectedIndex]?.text?.trim() || '';
+    tr.setAttribute('data-section-id', selectElem.value);
+    tr.setAttribute('data-section-name', optText);
+    recalculateKPIs();
+}
 
 // Drag and drop event handling
 const dropzone = document.getElementById("tt-dropzone");
@@ -1630,55 +2418,14 @@ function escapeHtml(text) {
 }
 
 function switchConflictPolicy(newMode) {
-    // 1. Update hidden input for confirm_import form
     const hiddenInput = document.getElementById('conflict_mode_input');
     if (hiddenInput) {
         hiddenInput.value = newMode;
     }
-
-    // 2. Update each table row that has an existing slot
-    const rows = document.querySelectorAll('#tt-table-body tr');
-    rows.forEach(tr => {
-        const hasError = tr.getAttribute('data-has-error') === '1';
-        const hasExisting = tr.getAttribute('data-has-existing') === '1';
-        if (hasError || !hasExisting) {
-            return; // Don't modify true errors or rows without existing slots
-        }
-
-        const statusCell = tr.querySelector('.status-cell');
-        const skipMsg = tr.getAttribute('data-msg-skip') || 'Slot occupied. Will be SKIPPED.';
-        const replaceMsg = tr.getAttribute('data-msg-replace') || 'Slot occupied. Will be REPLACED.';
-
-        if (newMode === 'skip') {
-            tr.classList.remove('row-is-replace');
-            tr.classList.add('row-is-skipped');
-            if (statusCell) {
-                statusCell.innerHTML = `
-                    <span class="tt-badge tt-badge-skipped" title="${escapeHtml(skipMsg)}">
-                        ⏭ SKIPPED
-                    </span>
-                    <div class="tt-reason tt-reason-skipped">
-                        ${escapeHtml(skipMsg)}
-                    </div>
-                `;
-            }
-        } else {
-            tr.classList.remove('row-is-skipped');
-            tr.classList.add('row-is-replace');
-            if (statusCell) {
-                statusCell.innerHTML = `
-                    <span class="tt-badge tt-badge-replace" title="${escapeHtml(replaceMsg)}">
-                        ↻ REPLACE
-                    </span>
-                    <div class="tt-reason tt-reason-replace">
-                        ${escapeHtml(replaceMsg)}
-                    </div>
-                `;
-            }
-        }
-    });
-
-    // 3. Recalculate KPI numbers
+    const policySelect = document.getElementById('preview_conflict_mode');
+    if (policySelect && policySelect.value !== newMode) {
+        policySelect.value = newMode;
+    }
     recalculateKPIs();
 }
 
@@ -1693,39 +2440,256 @@ function recalculateKPIs() {
     let countWarnings = 0;
     let countErrors = 0;
 
+    const secStats = {};
+    sectionsData.forEach(s => {
+        secStats[s.id] = { total: 0, ready: 0, skipped: 0, warnings: 0, errors: 0 };
+    });
+
+    // Pass 1: Parse rows & detect internal batch duplicates
+    const rowDataList = [];
+    const seenSectionSlots = {}; // "secId_day_pNum" => [rowItem]
+    const seenFacultySlots = {}; // "facId_day_pNum" => [rowItem]
+    const seenRoomSlots = {};    // "roomId_day_pNum" => [rowItem]
+
     rows.forEach(tr => {
-        const hasError = tr.getAttribute('data-has-error') === '1';
-        const hasExisting = tr.getAttribute('data-has-existing') === '1';
-        const hasWarning = tr.getAttribute('data-has-warning') === '1';
+        const rowIdx = tr.getAttribute('data-row-index');
+        const secSelect = tr.querySelector('select[name*="[section_id]"]');
+        const secId = secSelect ? parseInt(secSelect.value || '0', 10) : (parseInt(tr.getAttribute('data-section-id') || '0', 10) || defaultTargetSecId);
+        const secName = (sectionsData.find(s => s.id === secId)?.name) || tr.getAttribute('data-section-name') || 'Section';
 
-        // Check if user has unselected dropdowns
-        const subVal = tr.querySelector('select[name*="[subject_id]"]')?.value;
-        const facVal = tr.querySelector('select[name*="[faculty_id]"]')?.value;
-        const roomVal = tr.querySelector('select[name*="[classroom_id]"]')?.value;
-        const periodVal = tr.querySelector('select[name*="[period_number]"]')?.value;
-        const isUnmatched = (!subVal || !facVal || !roomVal || !periodVal);
+        const daySelect = tr.querySelector('select[name*="[day]"]');
+        const day = (daySelect?.value || '').toUpperCase().trim();
 
-        if (hasError) {
-            countErrors++;
-        } else if (currentMode === 'skip' && hasExisting) {
-            countSkipped++;
-            // Excluded from countReady under Skip policy!
-        } else if (currentMode === 'replace' && hasExisting) {
-            countWarnings++; // notice: slot will be replaced
-            if (!isUnmatched) {
-                countReady++;
+        const periodSelect = tr.querySelector('select[name*="[period_number]"]');
+        const periodNum = parseInt(periodSelect?.value || '0', 10);
+
+        const subSelect = tr.querySelector('select[name*="[subject_id]"]');
+        const subId = parseInt(subSelect?.value || '0', 10);
+
+        const facSelect = tr.querySelector('select[name*="[faculty_id]"]');
+        const facId = parseInt(facSelect?.value || '0', 10);
+
+        const roomSelect = tr.querySelector('select[name*="[classroom_id]"]');
+        const roomId = parseInt(roomSelect?.value || '0', 10);
+
+        // Check if DB slot exists for this section
+        const secSlotKey = `${secId}_${day}_${periodNum}`;
+        const dbSecSlot = (day && periodNum > 0) ? dbBookings.sections[secSlotKey] : null;
+        const isExisting = !!dbSecSlot;
+        const isSkipped = (isExisting && currentMode === 'skip');
+        const isReplace = (isExisting && currentMode === 'replace');
+
+        const rowItem = {
+            tr,
+            rowIdx,
+            secId,
+            secName,
+            day,
+            periodNum,
+            subId,
+            facId,
+            roomId,
+            isExisting,
+            isSkipped,
+            isReplace,
+            dbSecSlot,
+            errors: [],
+            warnings: []
+        };
+        rowDataList.push(rowItem);
+
+        if (secStats[secId]) {
+            secStats[secId].total++;
+        }
+
+        // If not skipped, track for internal batch collisions
+        if (!isSkipped && day && periodNum > 0) {
+            if (secId > 0) {
+                if (!seenSectionSlots[secSlotKey]) seenSectionSlots[secSlotKey] = [];
+                seenSectionSlots[secSlotKey].push(rowItem);
             }
-        } else {
-            // Normal slot
-            if (hasWarning || isUnmatched) {
-                countWarnings++;
+            if (facId > 0) {
+                const facKey = `${facId}_${day}_${periodNum}`;
+                if (!seenFacultySlots[facKey]) seenFacultySlots[facKey] = [];
+                seenFacultySlots[facKey].push(rowItem);
             }
-            if (!isUnmatched) {
-                countReady++;
+            if (roomId > 0) {
+                const roomKey = `${roomId}_${day}_${periodNum}`;
+                if (!seenRoomSlots[roomKey]) seenRoomSlots[roomKey] = [];
+                seenRoomSlots[roomKey].push(rowItem);
             }
         }
     });
 
+    // Pass 2: Evaluate collisions and validation
+    rowDataList.forEach(r => {
+        const tr = r.tr;
+        const statusCell = tr.querySelector('.status-cell');
+
+        if (r.isSkipped) {
+            tr.className = 'row-is-skipped';
+            tr.setAttribute('data-has-error', '0');
+            tr.setAttribute('data-has-existing', '1');
+            tr.setAttribute('data-has-warning', '0');
+
+            const ex = r.dbSecSlot;
+            const skipMsg = ex ? `Slot occupied: Section already has ${ex.sub_code} (${ex.fac_name}, Rm ${ex.room_num}). Will be SKIPPED.` : 'Slot occupied. Will be SKIPPED.';
+            if (statusCell) {
+                statusCell.innerHTML = `
+                    <span class="tt-badge tt-badge-skipped" title="${escapeHtml(skipMsg)}">
+                        ⏭ SKIPPED
+                    </span>
+                    <div class="tt-reason tt-reason-skipped">
+                        ${escapeHtml(skipMsg)}
+                    </div>
+                `;
+            }
+            countSkipped++;
+            if (secStats[r.secId]) secStats[r.secId].skipped++;
+            return;
+        }
+
+        // Check required fields
+        if (!r.day) r.errors.push("Please select a valid day.");
+        if (!r.periodNum) r.errors.push("Please select a period.");
+        if (isAllClassesMode && !r.secId) r.errors.push("Please select a section.");
+
+        if (!r.subId) r.warnings.push("Please choose a subject.");
+        if (!r.facId) r.warnings.push("Please choose a faculty.");
+        if (!r.roomId) r.warnings.push("Please choose a classroom.");
+
+        // Internal batch duplicate section slot
+        const secSlotKey = `${r.secId}_${r.day}_${r.periodNum}`;
+        if (seenSectionSlots[secSlotKey] && seenSectionSlots[secSlotKey].length > 1) {
+            r.errors.push(`Duplicate slot in table: ${r.secName} ${r.day} Period ${r.periodNum} assigned multiple times.`);
+        }
+
+        // Internal batch faculty double-booking
+        if (r.facId > 0 && r.day && r.periodNum > 0) {
+            const facKey = `${r.facId}_${r.day}_${r.periodNum}`;
+            if (seenFacultySlots[facKey] && seenFacultySlots[facKey].length > 1) {
+                const other = seenFacultySlots[facKey].find(o => o.rowIdx !== r.rowIdx);
+                const fName = facultyNames[r.facId] || 'Faculty';
+                r.errors.push(`Faculty double-booked in table: ${fName} assigned to both ${r.secName} and ${other ? other.secName : 'another class'} at ${r.day} P${r.periodNum}.`);
+            }
+        }
+
+        // Internal batch room collision
+        if (r.roomId > 0 && r.day && r.periodNum > 0) {
+            const roomKey = `${r.roomId}_${r.day}_${r.periodNum}`;
+            if (seenRoomSlots[roomKey] && seenRoomSlots[roomKey].length > 1) {
+                const other = seenRoomSlots[roomKey].find(o => o.rowIdx !== r.rowIdx);
+                const rNum = classroomNames[r.roomId] || 'Room';
+                r.errors.push(`Classroom double-booked in table: Room ${rNum} assigned to both ${r.secName} and ${other ? other.secName : 'another class'} at ${r.day} P${r.periodNum}.`);
+            }
+        }
+
+        // Database collisions against other sections
+        if (r.facId > 0 && r.day && r.periodNum > 0) {
+            const dbFac = dbBookings.faculty[`${r.facId}_${r.day}_${r.periodNum}`];
+            if (dbFac && dbFac.sec_id !== r.secId) {
+                const isReplacedInBatch = (currentMode === 'replace' && seenSectionSlots[`${dbFac.sec_id}_${r.day}_${r.periodNum}`]);
+                if (!isReplacedInBatch) {
+                    const fName = facultyNames[r.facId] || 'Faculty';
+                    r.errors.push(`Faculty double-booked: ${fName} is already teaching ${dbFac.sub_code} for Section ${dbFac.sec_name} at ${r.day} P${r.periodNum}.`);
+                }
+            }
+        }
+
+        if (r.roomId > 0 && r.day && r.periodNum > 0) {
+            const dbRoom = dbBookings.rooms[`${r.roomId}_${r.day}_${r.periodNum}`];
+            if (dbRoom && dbRoom.sec_id !== r.secId) {
+                const isReplacedInBatch = (currentMode === 'replace' && seenSectionSlots[`${dbRoom.sec_id}_${r.day}_${r.periodNum}`]);
+                if (!isReplacedInBatch) {
+                    const rNum = classroomNames[r.roomId] || 'Room';
+                    r.errors.push(`Classroom collision: Room ${rNum} is already occupied by Section ${dbRoom.sec_name} (${dbRoom.sub_code}) at ${r.day} P${r.periodNum}.`);
+                }
+            }
+        }
+
+        // Faculty-to-subject validity check
+        if (r.subId > 0 && r.facId > 0 && Object.keys(facultySubjectsMap).length > 0) {
+            if (!facultySubjectsMap[`${r.facId}_${r.subId}`]) {
+                const fName = facultyNames[r.facId] || 'Faculty';
+                const sCode = subjectCodes[r.subId] || 'Subject';
+                r.errors.push(`${fName} is not assigned to subject ${sCode} in faculty_subjects.`);
+            }
+        }
+
+        // Apply visual state to row
+        const hasErr = r.errors.length > 0;
+        const hasWarn = r.warnings.length > 0;
+
+        tr.setAttribute('data-has-error', hasErr ? '1' : '0');
+        tr.setAttribute('data-has-warning', hasWarn ? '1' : '0');
+        tr.setAttribute('data-has-existing', r.isExisting ? '1' : '0');
+
+        if (hasErr) {
+            tr.className = 'row-has-error';
+            countErrors++;
+            if (secStats[r.secId]) secStats[r.secId].errors++;
+            if (statusCell) {
+                statusCell.innerHTML = `
+                    <span class="tt-badge tt-badge-danger" title="${escapeHtml(r.errors.join('; '))}">
+                        ⛔ Conflict Error
+                    </span>
+                    <div class="tt-reason tt-reason-error">
+                        ${escapeHtml(r.errors[0])}
+                    </div>
+                `;
+            }
+        } else if (r.isReplace) {
+            tr.className = 'row-is-replace';
+            const ex = r.dbSecSlot;
+            const repMsg = ex ? `Will replace existing ${ex.sub_code} (${ex.fac_name}, Rm ${ex.room_num}).` : 'Will replace existing slot.';
+            countWarnings++;
+            if (secStats[r.secId]) secStats[r.secId].warnings++;
+            if (!hasWarn) {
+                countReady++;
+                if (secStats[r.secId]) secStats[r.secId].ready++;
+            }
+            if (statusCell) {
+                statusCell.innerHTML = `
+                    <span class="tt-badge tt-badge-replace" title="${escapeHtml(repMsg)}">
+                        ↻ REPLACE
+                    </span>
+                    <div class="tt-reason tt-reason-replace">
+                        ${escapeHtml(repMsg)}
+                    </div>
+                `;
+            }
+        } else if (hasWarn) {
+            tr.className = 'row-has-warning';
+            countWarnings++;
+            if (secStats[r.secId]) secStats[r.secId].warnings++;
+            if (statusCell) {
+                statusCell.innerHTML = `
+                    <span class="tt-badge tt-badge-warning" title="${escapeHtml(r.warnings.join('; '))}">
+                        ⚠ Needs Match
+                    </span>
+                    <div class="tt-reason tt-reason-warning">
+                        ${escapeHtml(r.warnings[0])}
+                    </div>
+                `;
+            }
+        } else {
+            tr.className = '';
+            countReady++;
+            if (secStats[r.secId]) secStats[r.secId].ready++;
+            if (statusCell) {
+                statusCell.innerHTML = `
+                    <span class="tt-badge tt-badge-success">
+                        ✓ Ready
+                    </span>
+                    <div class="tt-reason tt-reason-success">
+                        New slot ready to import
+                    </div>
+                `;
+            }
+        }
+    });
+
+    // Update KPI counters
     const elTotal = document.getElementById('kpi-total-val');
     const elReady = document.getElementById('kpi-ready-val');
     const elSkipped = document.getElementById('kpi-skipped-val');
@@ -1737,6 +2701,62 @@ function recalculateKPIs() {
     if (elSkipped) elSkipped.textContent = countSkipped;
     if (elWarning) elWarning.textContent = countWarnings;
     if (elError) elError.textContent = countErrors;
+
+    // Update Section Breakdown tiles (for all classes mode)
+    sectionsData.forEach(s => {
+        const st = secStats[s.id] || { total: 0, ready: 0, skipped: 0, warnings: 0, errors: 0 };
+        const elSTotal = document.getElementById('sec-stat-total-' + s.id);
+        const elSReady = document.getElementById('sec-stat-ready-' + s.id);
+        const elSSkipped = document.getElementById('sec-stat-skipped-' + s.id);
+        const elSIssues = document.getElementById('sec-stat-issues-' + s.id);
+        const elBadge = document.getElementById('sec-badge-' + s.id);
+        const elTile = document.getElementById('sec-tile-' + s.id);
+
+        if (elSTotal) elSTotal.textContent = st.total;
+        if (elSReady) elSReady.textContent = st.ready;
+        if (elSSkipped) elSSkipped.textContent = st.skipped;
+        if (elSIssues) {
+            const issues = st.warnings + st.errors;
+            elSIssues.textContent = issues;
+            elSIssues.style.color = (issues > 0) ? '#ff5277' : '#9bb0cd';
+        }
+        if (elBadge) {
+            if (st.errors > 0) {
+                elBadge.className = 'tt-sec-tile-badge badge-error';
+                elBadge.textContent = st.errors + ' Error' + (st.errors > 1 ? 's' : '');
+            } else {
+                elBadge.className = 'tt-sec-tile-badge badge-valid';
+                elBadge.textContent = st.total > 0 ? (st.ready + ' Ready') : '0 Entries';
+            }
+        }
+        if (elTile) {
+            elTile.className = 'tt-sec-tile ' + (st.errors > 0 ? 'tile-has-error' : 'tile-is-valid');
+        }
+    });
+
+    // Control Confirm Button & Alert Banner
+    const confirmBtn = document.getElementById('btn-confirm-import');
+    const alertBox = document.getElementById('tt-blocking-alert');
+
+    if (confirmBtn) {
+        if (countErrors > 0) {
+            confirmBtn.disabled = true;
+            confirmBtn.style.opacity = '0.55';
+            confirmBtn.style.cursor = 'not-allowed';
+            confirmBtn.title = 'Cannot import while blocking errors exist';
+        } else {
+            confirmBtn.disabled = false;
+            confirmBtn.style.opacity = '1';
+            confirmBtn.style.cursor = 'pointer';
+            confirmBtn.title = 'Confirm & Import to Database';
+        }
+    }
+
+    if (alertBox) {
+        alertBox.style.display = (countErrors > 0) ? 'flex' : 'none';
+        const h4 = alertBox.querySelector('h4');
+        if (h4) h4.textContent = `Blocking Conflicts Detected (${countErrors})`;
+    }
 }
 
 let extraRowCounter = 1000;
@@ -1750,11 +2770,29 @@ function addNewPreviewRow() {
     tr.setAttribute('data-has-error', '0');
     tr.setAttribute('data-has-existing', '0');
     tr.setAttribute('data-has-warning', '1');
+    tr.setAttribute('data-section-id', sectionsData[0]?.id || '1');
+    tr.setAttribute('data-section-name', sectionsData[0]?.name || 'CSE-A');
+
+    let sectionColHtml = '';
+    if (isAllClassesMode) {
+        let secOpts = '';
+        sectionsData.forEach(s => {
+            secOpts += `<option value="${s.id}">${escapeHtml(s.name)}</option>`;
+        });
+        sectionColHtml = `
+            <td>
+                <select name="rows[${newIdx}][section_id]" class="tt-select-compact" onchange="onRowSectionChange(${newIdx}, this)" required>
+                    ${secOpts}
+                </select>
+            </td>
+        `;
+    }
 
     tr.innerHTML = `
         <td style="text-align: center; color: #8494ae; font-weight: 750;">+</td>
+        ${sectionColHtml}
         <td>
-            <select name="rows[${newIdx}][day]" class="tt-select-compact" required>
+            <select name="rows[${newIdx}][day]" class="tt-select-compact" onchange="recalculateKPIs()" required>
                 <?php foreach ($validDays as $d): ?>
                     <option value="<?= $d ?>"><?= $d ?></option>
                 <?php endforeach; ?>
@@ -1796,7 +2834,7 @@ function addNewPreviewRow() {
             </select>
         </td>
         <td>
-            <select name="rows[${newIdx}][status]" class="tt-select-compact">
+            <select name="rows[${newIdx}][status]" class="tt-select-compact" onchange="recalculateKPIs()">
                 <option value="PUBLISHED" selected>PUBLISHED</option>
                 <option value="DRAFT">DRAFT</option>
             </select>
@@ -1824,10 +2862,15 @@ function validateBeforeConfirm() {
         return false;
     }
 
+    // Force recalculation before validating submission
+    recalculateKPIs();
+
+    let hasBlockingError = false;
     let hasEmptySubject = false;
     let hasEmptyFaculty = false;
     let hasEmptyRoom = false;
     let hasEmptyPeriod = false;
+    let hasEmptySection = false;
 
     rows.forEach(tr => {
         // Skip validation for rows that are skipped under the active conflict policy!
@@ -1835,19 +2878,30 @@ function validateBeforeConfirm() {
             return;
         }
 
+        if (tr.getAttribute('data-has-error') === '1') {
+            hasBlockingError = true;
+        }
+
         const subSelect = tr.querySelector('select[name*="[subject_id]"]');
         const facSelect = tr.querySelector('select[name*="[faculty_id]"]');
         const roomSelect = tr.querySelector('select[name*="[classroom_id]"]');
         const periodSelect = tr.querySelector('select[name*="[period_number]"]');
+        const secSelect = tr.querySelector('select[name*="[section_id]"]');
 
         if (subSelect && !subSelect.value) hasEmptySubject = true;
         if (facSelect && !facSelect.value) hasEmptyFaculty = true;
         if (roomSelect && !roomSelect.value) hasEmptyRoom = true;
         if (periodSelect && !periodSelect.value) hasEmptyPeriod = true;
+        if (isAllClassesMode && secSelect && !secSelect.value) hasEmptySection = true;
     });
 
-    if (hasEmptySubject || hasEmptyFaculty || hasEmptyRoom || hasEmptyPeriod) {
-        return confirm("Some active rows contain unselected subjects, faculty, classrooms, or periods. Importing will fail if invalid rows remain. Are you sure you wish to submit?");
+    if (hasBlockingError) {
+        alert("Cannot import: The timetable contains blocking errors or collisions (highlighted in red). Please resolve or remove conflicting rows before proceeding.");
+        return false;
+    }
+
+    if (hasEmptySubject || hasEmptyFaculty || hasEmptyRoom || hasEmptyPeriod || hasEmptySection) {
+        return confirm("Some active rows contain unselected sections, subjects, faculty, classrooms, or periods. Importing will fail if invalid rows remain. Are you sure you wish to submit?");
     }
 
     showLoading();

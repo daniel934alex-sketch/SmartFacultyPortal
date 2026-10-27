@@ -32,8 +32,12 @@ class TimetableParser
     private array $subjectNameMap = [];
     private array $facultyCodeMap = [];
     private array $facultyNameMap = [];
+    private array $facultyUsernameMap = [];
     private array $classroomMap = [];
     private array $periodNumMap = [];
+    // Valid faculty-subject combinations from faculty_subjects ("facultyId_subjectId" => true).
+    private array $facultySubjectMap = [];
+    private bool $facultySubjectMapLoaded = false;
 
     public function __construct(mysqli $conn)
     {
@@ -80,7 +84,12 @@ class TimetableParser
         }
 
         // 4. Faculty
-        $res = $this->conn->query("SELECT faculty_id, faculty_code, faculty_name FROM faculty ORDER BY faculty_name");
+        $res = $this->conn->query("
+            SELECT f.faculty_id, f.faculty_code, f.faculty_name, u.username 
+            FROM faculty f 
+            LEFT JOIN users u ON u.user_id = f.user_id 
+            ORDER BY f.faculty_name
+        ");
         if ($res) {
             while ($row = $res->fetch_assoc()) {
                 $id = (int)$row['faculty_id'];
@@ -89,7 +98,21 @@ class TimetableParser
                 $nameKey = strtolower(trim($row['faculty_name']));
                 $this->facultyCodeMap[$codeKey] = $id;
                 $this->facultyNameMap[$nameKey] = $id;
+                if (!empty($row['username'])) {
+                    $userKey = strtolower(trim($row['username']));
+                    $this->facultyUsernameMap[$userKey] = $id;
+                }
             }
+        }
+
+        // 4b. Faculty-subject assignments. Keep imports aligned with the database mapping.
+        $res = $this->conn->query("SELECT faculty_id, subject_id FROM faculty_subjects");
+        if ($res) {
+            while ($row = $res->fetch_assoc()) {
+                $key = (int)$row['faculty_id'] . '_' . (int)$row['subject_id'];
+                $this->facultySubjectMap[$key] = true;
+            }
+            $this->facultySubjectMapLoaded = true;
         }
 
         // 5. Classrooms
@@ -161,7 +184,7 @@ class TimetableParser
      * @param string $defaultStatus
      * @return array [ 'success' => bool, 'rows' => array, 'message' => string, 'format' => string ]
      */
-    public function parseFile(string $filePath, string $extension, int $defaultSectionId = 0, string $defaultStatus = 'PUBLISHED', string $conflictMode = 'replace'): array
+    public function parseFile(string $filePath, string $extension, int $defaultSectionId = 0, string $defaultStatus = 'PUBLISHED', string $conflictMode = 'replace', string $uploadMode = 'single'): array
     {
         $ext = strtolower(trim($extension));
         $rawRows = [];
@@ -171,7 +194,7 @@ class TimetableParser
                 case 'xlsx':
                 case 'xls':
                 case 'csv':
-                    $result = $this->parseSpreadsheet($filePath, $ext);
+                    $result = $this->parseSpreadsheet($filePath, $ext, $uploadMode);
                     if (!$result['success']) {
                         return $result;
                     }
@@ -223,7 +246,7 @@ class TimetableParser
         $mappedRows = [];
         $rowIndex = 1;
         foreach ($rawRows as $raw) {
-            $mapped = $this->normalizeAndMapRow($raw, $rowIndex++, $defaultSectionId, $defaultStatus);
+            $mapped = $this->normalizeAndMapRow($raw, $rowIndex++, $defaultSectionId, $defaultStatus, $uploadMode);
             if ($mapped !== null) {
                 $mappedRows[] = $mapped;
             }
@@ -238,7 +261,7 @@ class TimetableParser
         }
 
         // Perform conflict checks within the batch and with the database
-        $analyzedRows = $this->detectConflicts($mappedRows, $defaultSectionId, $conflictMode);
+        $analyzedRows = $this->detectConflicts($mappedRows, $defaultSectionId, $conflictMode, $uploadMode);
 
         return [
             'success' => true,
@@ -251,7 +274,7 @@ class TimetableParser
     /**
      * Parse Spreadsheet (Excel / CSV)
      */
-    private function parseSpreadsheet(string $filePath, string $ext): array
+    private function parseSpreadsheet(string $filePath, string $ext, string $uploadMode = 'single'): array
     {
         if (!class_exists('\\PhpOffice\\PhpSpreadsheet\\IOFactory')) {
             return [
@@ -262,7 +285,56 @@ class TimetableParser
         }
 
         try {
-            $spreadsheet = \PhpOffice\PhpSpreadsheet\IOFactory::load($filePath);
+            $spreadsheet = null;
+            if ($ext === 'xlsx') {
+                try {
+                    $reader = new \PhpOffice\PhpSpreadsheet\Reader\Xlsx();
+                    $spreadsheet = $reader->load($filePath);
+                } catch (\Throwable $e) {
+                    $spreadsheet = null;
+                }
+            } elseif ($ext === 'xls') {
+                try {
+                    $reader = new \PhpOffice\PhpSpreadsheet\Reader\Xls();
+                    $spreadsheet = $reader->load($filePath);
+                } catch (\Throwable $e) {
+                    $spreadsheet = null;
+                }
+            }
+            if ($spreadsheet === null) {
+                $spreadsheet = \PhpOffice\PhpSpreadsheet\IOFactory::load($filePath);
+            }
+            $sheetCount = $spreadsheet->getSheetCount();
+
+            // Support multi-sheet workbooks where each sheet represents a section (e.g., CSE-A, CSE-B, etc.)
+            if ($sheetCount > 1) {
+                $allRows = [];
+                $foundAnyValidSheet = false;
+                $skipTitles = ['readme', 'read me', 'instructions', 'notes', 'help', 'info', 'guide', 'about'];
+                foreach ($spreadsheet->getAllSheets() as $sheet) {
+                    $sheetTitle = trim($sheet->getTitle());
+                    if (in_array(strtolower($sheetTitle), $skipTitles, true)) {
+                        continue;
+                    }
+                    $data = $sheet->toArray(null, true, true, false);
+                    if (empty($data)) continue;
+
+                    $res = $this->parseTableOrGridData($data, $sheetTitle);
+                    if ($res['success'] && !empty($res['rows'])) {
+                        $foundAnyValidSheet = true;
+                        foreach ($res['rows'] as $r) {
+                            if (empty($r['section']) && $this->matchSection($sheetTitle) > 0) {
+                                $r['section'] = $sheetTitle;
+                            }
+                            $allRows[] = $r;
+                        }
+                    }
+                }
+                if ($foundAnyValidSheet && !empty($allRows)) {
+                    return ['success' => true, 'rows' => $allRows];
+                }
+            }
+
             $sheet = $spreadsheet->getActiveSheet();
             $data = $sheet->toArray(null, true, true, false);
         } catch (\Throwable $e) {
@@ -288,7 +360,7 @@ class TimetableParser
      * Detect whether sheet data is Tabular (Day, Period, Subject, Faculty, Room)
      * or Matrix/Grid (Days as rows, Periods as columns)
      */
-    private function parseTableOrGridData(array $rows): array
+    private function parseTableOrGridData(array $rows, string $defaultSectionTitle = ''): array
     {
         // Filter out empty rows
         $cleanRows = [];
@@ -355,9 +427,9 @@ class TimetableParser
                 elseif (strpos($norm, 'end') !== false) $colMap['end_time'] = $cIdx;
                 elseif (strpos($norm, 'subject') !== false || strpos($norm, 'course') !== false) $colMap['subject'] = $cIdx;
                 elseif (strpos($norm, 'faculty') !== false || strpos($norm, 'teacher') !== false || strpos($norm, 'instructor') !== false) $colMap['faculty'] = $cIdx;
-                elseif (strpos($norm, 'room') !== false || strpos($norm, 'class') !== false || strpos($norm, 'lab') !== false) $colMap['classroom'] = $cIdx;
+                elseif (strpos($norm, 'section') !== false || $norm === 'sec' || $norm === 'class') $colMap['section'] = $cIdx;
+                elseif (strpos($norm, 'room') !== false || strpos($norm, 'classroom') !== false || strpos($norm, 'hall') !== false || strpos($norm, 'lab') !== false) $colMap['classroom'] = $cIdx;
                 elseif (strpos($norm, 'status') !== false) $colMap['status'] = $cIdx;
-                elseif (strpos($norm, 'section') !== false) $colMap['section'] = $cIdx;
             }
 
             $extracted = [];
@@ -369,7 +441,7 @@ class TimetableParser
                 $facultyVal = isset($colMap['faculty']) ? ($r[$colMap['faculty']] ?? '') : '';
                 $roomVal = isset($colMap['classroom']) ? ($r[$colMap['classroom']] ?? '') : '';
                 $statusVal = isset($colMap['status']) ? ($r[$colMap['status']] ?? '') : '';
-                $sectionVal = isset($colMap['section']) ? ($r[$colMap['section']] ?? '') : '';
+                $sectionVal = isset($colMap['section']) ? ($r[$colMap['section']] ?? '') : $defaultSectionTitle;
 
                 // Skip completely empty lines
                 if (empty($dayVal) && empty($periodVal) && empty($subjectVal)) {
@@ -473,7 +545,8 @@ class TimetableParser
                     'subject' => $parsedCell['subject'],
                     'faculty' => $parsedCell['faculty'],
                     'classroom' => $parsedCell['classroom'],
-                    'status' => 'PUBLISHED'
+                    'status' => 'PUBLISHED',
+                    'section' => $cleanRows[$i]['section'] ?? ''
                 ];
             }
         }
@@ -486,7 +559,7 @@ class TimetableParser
      */
     private function parseCellComponents(string $cellText): array
     {
-        $lines = preg_split('/[\r\n|\/|\-]+/', $cellText);
+        $lines = preg_split('/[\r\n|\/]+/', $cellText);
         $lines = array_values(array_filter(array_map('trim', $lines)));
 
         $subject = $lines[0] ?? '';
@@ -713,7 +786,7 @@ class TimetableParser
     /**
      * Normalize a single extracted row and map text to database IDs
      */
-    private function normalizeAndMapRow(array $raw, int $index, int $defaultSectionId, string $defaultStatus): ?array
+    private function normalizeAndMapRow(array $raw, int $index, int $defaultSectionId, string $defaultStatus, string $uploadMode = 'single'): ?array
     {
         $rawDay = trim((string)($raw['day'] ?? ''));
         $rawPeriod = trim((string)($raw['period'] ?? ''));
@@ -761,11 +834,14 @@ class TimetableParser
         $sectionId = $defaultSectionId;
         if (!empty($rawSection)) {
             $matchedSecId = $this->matchSection($rawSection);
-            if ($matchedSecId) {
+            if ($matchedSecId > 0 && isset($this->sections[$matchedSecId])) {
                 $sectionId = $matchedSecId;
+            } else {
+                $errors[] = "Invalid section: '{$rawSection}'. Accepted sections: CSE-A, CSE-B, CSE-C, CSE-D, CSE-E.";
             }
-        }
-        if ($sectionId <= 0) {
+        } elseif ($uploadMode === 'all') {
+            $errors[] = "Section not specified in row.";
+        } elseif ($sectionId <= 0) {
             $errors[] = "Section not specified.";
         }
 
@@ -779,6 +855,17 @@ class TimetableParser
         $facultyId = $this->matchFaculty($rawFaculty);
         if ($facultyId === 0) {
             $warnings[] = "Faculty '{$rawFaculty}' could not be matched with database faculty.";
+        }
+
+        // 5. Validate that the selected faculty is assigned to the selected subject.
+        // Do not guess when either value failed to map; the mapping warning above remains visible.
+        if ($subjectId > 0 && $facultyId > 0 && $this->facultySubjectMapLoaded) {
+            $assignmentKey = $facultyId . '_' . $subjectId;
+            if (!isset($this->facultySubjectMap[$assignmentKey])) {
+                $facultyName = $this->faculty[$facultyId]['faculty_name'] ?? $rawFaculty;
+                $subjectCode = $this->subjects[$subjectId]['subject_code'] ?? $rawSubject;
+                $errors[] = "{$facultyName} is not assigned to subject {$subjectCode} in faculty_subjects.";
+            }
         }
 
         // 6. Classroom
@@ -808,6 +895,7 @@ class TimetableParser
             'raw_faculty' => $rawFaculty,
             'raw_classroom' => $rawClassroom,
             'raw_status' => $rawStatus,
+            'raw_section' => $rawSection,
             'errors' => $errors,
             'warnings' => $warnings,
             'conflict' => null
@@ -816,53 +904,76 @@ class TimetableParser
 
     /**
      * Detect conflicts:
-     * 1. Internal duplicates within batch (same section/day/period, same faculty/day/period, same room/day/period)
+     * 1. Internal duplicates within batch (same section/day/period, same faculty/day/period across sections, same room/day/period across sections)
      * 2. Database collisions (faculty or room booked by another section)
      * 3. Existing section entries in DB (for replacement prompt)
      */
-    public function detectConflicts(array $rows, int $targetSectionId, string $conflictMode = 'replace'): array
+    public function detectConflicts(array $rows, int $targetSectionId, string $conflictMode = 'replace', string $uploadMode = 'single'): array
     {
-        $seenSectionSlots = []; // "DAY_P" => [row_index]
-        $seenFacultySlots = []; // "FACID_DAY_P" => [row_index]
-        $seenRoomSlots    = []; // "ROOMID_DAY_P" => [row_index]
+        $seenSectionSlots = []; // "SECID_DAY_P" => row_index
+        $seenFacultySlots = []; // "FACID_DAY_P" => ['row_index' => X, 'section_id' => Y, 'section_name' => Z]
+        $seenRoomSlots    = []; // "ROOMID_DAY_P" => ['row_index' => X, 'section_id' => Y, 'section_name' => Z]
+
+        // Track all slots defined in this batch: "SECID_DAY_PID" => row
+        $batchSlotsBySection = [];
+        foreach ($rows as $r) {
+            $sId = $r['section_id'] > 0 ? $r['section_id'] : $targetSectionId;
+            $d = $r['day'];
+            $pId = $r['period_id'];
+            if ($sId > 0 && $d && $pId > 0) {
+                $batchSlotsBySection["{$sId}_{$d}_{$pId}"] = $r;
+            }
+        }
 
         // First pass: internal batch conflicts
         foreach ($rows as $k => $r) {
             $day = $r['day'];
             $pNum = $r['period_number'];
+            $secId = $r['section_id'] > 0 ? $r['section_id'] : $targetSectionId;
+            $secName = $this->sections[$secId]['section_name'] ?? ($r['raw_section'] ?: ($secId > 0 ? "Sec #{$secId}" : "Unknown Section"));
+
             if (!$day || !$pNum) continue;
 
-            $slotKey = "{$day}_{$pNum}";
-
-            // Section duplicate
-            if (isset($seenSectionSlots[$slotKey])) {
-                $prevIdx = $seenSectionSlots[$slotKey];
-                $rows[$k]['errors'][] = "Duplicate slot in file: {$day} Period {$pNum} already defined in Row {$prevIdx}.";
-            } else {
-                $seenSectionSlots[$slotKey] = $r['row_index'];
-            }
-
-            // Faculty duplicate within batch
-            if ($r['faculty_id'] > 0) {
-                $facKey = "{$r['faculty_id']}_{$day}_{$pNum}";
-                if (isset($seenFacultySlots[$facKey])) {
-                    $prevIdx = $seenFacultySlots[$facKey];
-                    $facName = $this->faculty[$r['faculty_id']]['faculty_name'] ?? 'Faculty';
-                    $rows[$k]['errors'][] = "Faculty double-booked in file: {$facName} already assigned at {$day} P{$pNum} in Row {$prevIdx}.";
+            // Section duplicate within batch
+            if ($secId > 0) {
+                $slotKey = "{$secId}_{$day}_{$pNum}";
+                if (isset($seenSectionSlots[$slotKey])) {
+                    $prevIdx = $seenSectionSlots[$slotKey];
+                    $rows[$k]['errors'][] = "Duplicate slot in file: {$secName} {$day} Period {$pNum} already defined in Row {$prevIdx}.";
                 } else {
-                    $seenFacultySlots[$facKey] = $r['row_index'];
+                    $seenSectionSlots[$slotKey] = $r['row_index'];
                 }
             }
 
-            // Room duplicate within batch
+            // Faculty duplicate within batch across any sections
+            if ($r['faculty_id'] > 0) {
+                $facKey = "{$r['faculty_id']}_{$day}_{$pNum}";
+                if (isset($seenFacultySlots[$facKey])) {
+                    $prev = $seenFacultySlots[$facKey];
+                    $facName = $this->faculty[$r['faculty_id']]['faculty_name'] ?? 'Faculty';
+                    $rows[$k]['errors'][] = "Faculty double-booked in file: {$facName} already assigned to {$prev['section_name']} at {$day} P{$pNum} in Row {$prev['row_index']}.";
+                } else {
+                    $seenFacultySlots[$facKey] = [
+                        'row_index' => $r['row_index'],
+                        'section_id' => $secId,
+                        'section_name' => $secName
+                    ];
+                }
+            }
+
+            // Room duplicate within batch across any sections
             if ($r['classroom_id'] > 0) {
                 $roomKey = "{$r['classroom_id']}_{$day}_{$pNum}";
                 if (isset($seenRoomSlots[$roomKey])) {
-                    $prevIdx = $seenRoomSlots[$roomKey];
+                    $prev = $seenRoomSlots[$roomKey];
                     $roomNum = $this->classrooms[$r['classroom_id']]['room_number'] ?? 'Room';
-                    $rows[$k]['errors'][] = "Classroom double-booked in file: Room {$roomNum} already assigned at {$day} P{$pNum} in Row {$prevIdx}.";
+                    $rows[$k]['errors'][] = "Classroom double-booked in file: Room {$roomNum} already assigned to {$prev['section_name']} at {$day} P{$pNum} in Row {$prev['row_index']}.";
                 } else {
-                    $seenRoomSlots[$roomKey] = $r['row_index'];
+                    $seenRoomSlots[$roomKey] = [
+                        'row_index' => $r['row_index'],
+                        'section_id' => $secId,
+                        'section_name' => $secName
+                    ];
                 }
             }
         }
@@ -877,7 +988,7 @@ class TimetableParser
 
             if (!$day || !$periodId) continue;
 
-            // 1. Check if section already has an entry in DB
+            // 1. Check if this section already has an entry in DB
             if ($secId > 0) {
                 $stmt = $this->conn->prepare("
                     SELECT t.timetable_id, s.subject_code, s.subject_name, f.faculty_name, c.room_number, t.status
@@ -929,10 +1040,16 @@ class TimetableParser
                 }
             }
 
+            // If this slot already exists in DB and conflictMode is 'skip', it is marked skipped
+            // and will NOT be imported. Do not check external collisions with other sections for this slot.
+            if (!empty($rows[$k]['is_skipped'])) {
+                continue;
+            }
+
             // 2. Check if faculty is busy teaching another section in DB
             if ($facId > 0) {
                 $stmt = $this->conn->prepare("
-                    SELECT t.timetable_id, sec.section_name, s.subject_code
+                    SELECT t.timetable_id, t.section_id, sec.section_name, s.subject_code
                     FROM timetable t
                     INNER JOIN sections sec ON sec.section_id = t.section_id
                     INNER JOIN subjects s ON s.subject_id = t.subject_id
@@ -945,8 +1062,21 @@ class TimetableParser
                     $res = $stmt->get_result();
                     if ($res && $res->num_rows > 0) {
                         $busy = $res->fetch_assoc();
-                        $facName = $this->faculty[$facId]['faculty_name'] ?? 'Faculty';
-                        $rows[$k]['errors'][] = "Faculty double-booked: {$facName} is already teaching {$busy['subject_code']} for Section {$busy['section_name']} at {$day} P{$r['period_number']}.";
+                        $otherSecId = (int)$busy['section_id'];
+
+                        // Check if this other section slot in DB is being replaced by the current batch
+                        $otherSlotReplaced = false;
+                        if ($conflictMode === 'replace' && isset($batchSlotsBySection["{$otherSecId}_{$day}_{$periodId}"])) {
+                            $otherBatchRow = $batchSlotsBySection["{$otherSecId}_{$day}_{$periodId}"];
+                            if ($otherBatchRow['faculty_id'] !== $facId) {
+                                $otherSlotReplaced = true;
+                            }
+                        }
+
+                        if (!$otherSlotReplaced) {
+                            $facName = $this->faculty[$facId]['faculty_name'] ?? 'Faculty';
+                            $rows[$k]['errors'][] = "Faculty double-booked: {$facName} is already teaching {$busy['subject_code']} for Section {$busy['section_name']} at {$day} P{$r['period_number']}.";
+                        }
                     }
                     $stmt->close();
                 }
@@ -955,7 +1085,7 @@ class TimetableParser
             // 3. Check if classroom is occupied by another section in DB
             if ($roomId > 0) {
                 $stmt = $this->conn->prepare("
-                    SELECT t.timetable_id, sec.section_name, s.subject_code
+                    SELECT t.timetable_id, t.section_id, sec.section_name, s.subject_code
                     FROM timetable t
                     INNER JOIN sections sec ON sec.section_id = t.section_id
                     INNER JOIN subjects s ON s.subject_id = t.subject_id
@@ -968,8 +1098,21 @@ class TimetableParser
                     $res = $stmt->get_result();
                     if ($res && $res->num_rows > 0) {
                         $occ = $res->fetch_assoc();
-                        $roomNum = $this->classrooms[$roomId]['room_number'] ?? 'Room';
-                        $rows[$k]['errors'][] = "Classroom collision: Room {$roomNum} is already occupied by Section {$occ['section_name']} ({$occ['subject_code']}) at {$day} P{$r['period_number']}.";
+                        $otherSecId = (int)$occ['section_id'];
+
+                        // Check if this other section slot in DB is being replaced by the current batch
+                        $otherSlotReplaced = false;
+                        if ($conflictMode === 'replace' && isset($batchSlotsBySection["{$otherSecId}_{$day}_{$periodId}"])) {
+                            $otherBatchRow = $batchSlotsBySection["{$otherSecId}_{$day}_{$periodId}"];
+                            if ($otherBatchRow['classroom_id'] !== $roomId) {
+                                $otherSlotReplaced = true;
+                            }
+                        }
+
+                        if (!$otherSlotReplaced) {
+                            $roomNum = $this->classrooms[$roomId]['room_number'] ?? 'Room';
+                            $rows[$k]['errors'][] = "Classroom collision: Room {$roomNum} is already occupied by Section {$occ['section_name']} ({$occ['subject_code']}) at {$day} P{$r['period_number']}.";
+                        }
                     }
                     $stmt->close();
                 }
@@ -1036,6 +1179,14 @@ class TimetableParser
             return $this->facultyNameMap[$clean];
         }
 
+        // Username match (e.g. from faculty_username column)
+        if (isset($this->facultyUsernameMap[$raw])) {
+            return $this->facultyUsernameMap[$raw];
+        }
+        if (isset($this->facultyUsernameMap[$clean])) {
+            return $this->facultyUsernameMap[$clean];
+        }
+
         // Substring check
         foreach ($this->faculty as $id => $f) {
             $fCode = strtolower($f['faculty_code']);
@@ -1099,6 +1250,18 @@ class TimetableParser
             $hyphenated = str_replace(' ', '-', $raw);
             if ($sName === $hyphenated) {
                 return $id;
+            }
+            // Match "CSE_A" -> "CSE-A"
+            $underscored = str_replace('_', '-', $raw);
+            if ($sName === $underscored) {
+                return $id;
+            }
+            // If section is "CSE-A", allow matching "A", "Section A", "Sec A", "Sec-A"
+            if (preg_match('/^cse-([a-e])$/i', $sName, $sm)) {
+                $letter = $sm[1];
+                if ($raw === $letter || $raw === "section $letter" || $raw === "sec $letter" || $raw === "sec-$letter") {
+                    return $id;
+                }
             }
         }
 

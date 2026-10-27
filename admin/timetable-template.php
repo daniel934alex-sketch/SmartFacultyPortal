@@ -12,11 +12,11 @@ require_once "../config/database.php";
 require_once "../vendor/autoload.php";
 
 $format = strtolower(trim($_GET['format'] ?? 'csv'));
+$mode = strtolower(trim($_GET['mode'] ?? 'single'));
 
 // Sample rows pre-populated with real database references
-$headers = ["Day", "Period", "Subject", "Faculty", "Classroom", "Status"];
-
-$sampleRows = [
+$singleHeaders = ["Day", "Period", "Subject", "Faculty", "Classroom", "Status"];
+$singleSampleRows = [
     ["MONDAY", "1", "DBMS", "Dr. Arun Kumar", "36", "PUBLISHED"],
     ["MONDAY", "2", "ADSA", "Prof. Priya Sharma", "36", "PUBLISHED"],
     ["MONDAY", "3", "OS", "Prof. Karthik Raj", "36", "PUBLISHED"],
@@ -54,10 +54,49 @@ $sampleRows = [
     ["SATURDAY", "3", "EE-PROJECT", "Prof. Meena R", "LAB-1", "PUBLISHED"]
 ];
 
+$allHeaders = ["Section", "Day", "Period", "Subject", "Faculty", "Classroom", "Status"];
+$allSampleRows = [];
+
+// Rotate subject, faculty and classroom assignments across the 5 sections to avoid conflicts
+$secConfigs = [
+    'CSE-A' => ['room' => '36', 'fac_offset' => 0],
+    'CSE-B' => ['room' => '37', 'fac_offset' => 1],
+    'CSE-C' => ['room' => '38', 'fac_offset' => 2],
+    'CSE-D' => ['room' => '39', 'fac_offset' => 3],
+    'CSE-E' => ['room' => '40', 'fac_offset' => 4]
+];
+
+$facultyPool = [
+    ["DBMS", "Dr. Arun Kumar"],
+    ["ADSA", "Prof. Priya Sharma"],
+    ["OS", "Prof. Karthik Raj"],
+    ["MATHS", "Prof. Divya S"],
+    ["KVD", "Prof. Naveen Kumar"],
+    ["ENG", "Prof. Meena R"]
+];
+
+$days = ["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY"];
+foreach ($secConfigs as $secName => $cfg) {
+    $secOffset = $cfg['fac_offset'];
+    $room = $cfg['room'];
+    foreach ($days as $dIdx => $day) {
+        for ($p = 1; $p <= 6; $p++) {
+            $poolIdx = ($p - 1 + $dIdx + $secOffset) % count($facultyPool);
+            $item = $facultyPool[$poolIdx];
+            $allSampleRows[] = [$secName, $day, (string)$p, $item[0], $item[1], $room, "PUBLISHED"];
+        }
+    }
+}
+
+$isAllMode = ($mode === 'all');
+$headers = $isAllMode ? $allHeaders : $singleHeaders;
+$sampleRows = $isAllMode ? $allSampleRows : $singleSampleRows;
+$filenamePrefix = $isAllMode ? "all_classes_timetable_template" : "timetable_template";
+
 if ($format === 'xlsx') {
     $spreadsheet = new \PhpOffice\PhpSpreadsheet\Spreadsheet();
     $sheet = $spreadsheet->getActiveSheet();
-    $sheet->setTitle("Timetable Template");
+    $sheet->setTitle($isAllMode ? "All Sections" : "Timetable Template");
 
     // Write header
     foreach ($headers as $cIdx => $h) {
@@ -76,8 +115,9 @@ if ($format === 'xlsx') {
         $sheet->getColumnDimensionByColumn($col)->setAutoSize(true);
     }
 
+    if (ob_get_length()) ob_clean();
     header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    header('Content-Disposition: attachment; filename="timetable_template.xlsx"');
+    header('Content-Disposition: attachment; filename="' . $filenamePrefix . '.xlsx"');
     header('Cache-Control: max-age=0');
 
     $writer = new \PhpOffice\PhpSpreadsheet\Writer\Xlsx($spreadsheet);
@@ -85,8 +125,9 @@ if ($format === 'xlsx') {
     exit;
 } else {
     // Default CSV
+    if (ob_get_length()) ob_clean();
     header('Content-Type: text/csv; charset=utf-8');
-    header('Content-Disposition: attachment; filename="timetable_template.csv"');
+    header('Content-Disposition: attachment; filename="' . $filenamePrefix . '.csv"');
     header('Cache-Control: max-age=0');
 
     $output = fopen('php://output', 'w');

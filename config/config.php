@@ -29,5 +29,3 @@ define("BASE_URL", $baseUrl);
 
 // Timezone
 date_default_timezone_set("Asia/Kolkata");
-
-?>

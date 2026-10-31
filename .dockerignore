@@ -1,0 +1,41 @@
+# Version control
+.git/
+.gitignore
+
+# Environment variables, credentials, and secrets
+.env
+.env.*
+config.local.php
+*.key
+*.pem
+*credential*
+*secret*
+
+# Database backups and SQL dumps
+*.sql
+*.sql.gz
+database/*.sql
+database/*backup*
+
+# Backup files and test scripts
+*.bak
+*.bak*
+*.bak_*
+*backup*
+test-db.php
+scratch/
+
+# Composer vendor directory (installed freshly inside container)
+vendor/
+
+# Local IDE and environment files
+.vscode/
+.idea/
+xampp/
+laragon/
+.DS_Store
+Thumbs.db
+
+# Logs and temporary files
+*.log
+*.tmp

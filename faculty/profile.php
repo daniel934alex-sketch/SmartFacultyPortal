@@ -1,4 +1,3 @@
-
 <?php
 require_once "../includes/auth-check.php";
 require_once "../includes/role-check.php";

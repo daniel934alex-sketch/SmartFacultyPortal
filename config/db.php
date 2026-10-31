@@ -1,9 +1,4 @@
 <?php
 
-$conn = new mysqli("localhost", "root", "", "smart_faculty");
-
-if ($conn->connect_error) {
-    die("Database connection failed: " . $conn->connect_error);
-}
-
-?>
+// Shared database connection pointing to unified database configuration
+require_once __DIR__ . "/database.php";

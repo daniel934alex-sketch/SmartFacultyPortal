@@ -421,15 +421,29 @@ class TimetableParser
             $header = $cleanRows[$headerRowIdx];
             foreach ($header as $cIdx => $name) {
                 $norm = strtolower(trim($name));
-                if (strpos($norm, 'day') !== false) $colMap['day'] = $cIdx;
-                elseif (strpos($norm, 'period') !== false) $colMap['period'] = $cIdx;
-                elseif (strpos($norm, 'start') !== false) $colMap['start_time'] = $cIdx;
-                elseif (strpos($norm, 'end') !== false) $colMap['end_time'] = $cIdx;
-                elseif (strpos($norm, 'subject') !== false || strpos($norm, 'course') !== false) $colMap['subject'] = $cIdx;
-                elseif (strpos($norm, 'faculty') !== false || strpos($norm, 'teacher') !== false || strpos($norm, 'instructor') !== false) $colMap['faculty'] = $cIdx;
-                elseif (strpos($norm, 'section') !== false || $norm === 'sec' || $norm === 'class') $colMap['section'] = $cIdx;
-                elseif (strpos($norm, 'room') !== false || strpos($norm, 'classroom') !== false || strpos($norm, 'hall') !== false || strpos($norm, 'lab') !== false) $colMap['classroom'] = $cIdx;
-                elseif (strpos($norm, 'status') !== false) $colMap['status'] = $cIdx;
+                if (strpos($norm, 'day') !== false) {
+                    $colMap['day'] = $cIdx;
+                } elseif (strpos($norm, 'period') !== false) {
+                    $colMap['period'] = $cIdx;
+                } elseif (strpos($norm, 'start') !== false) {
+                    $colMap['start_time'] = $cIdx;
+                } elseif (strpos($norm, 'end') !== false) {
+                    $colMap['end_time'] = $cIdx;
+                } elseif (strpos($norm, 'subject_code') !== false || strpos($norm, 'course_code') !== false) {
+                    $colMap['subject'] = $cIdx;
+                } elseif (strpos($norm, 'subject_name') !== false || strpos($norm, 'course_name') !== false) {
+                    if (!isset($colMap['subject'])) $colMap['subject'] = $cIdx;
+                } elseif (strpos($norm, 'type') === false && (strpos($norm, 'subject') !== false || strpos($norm, 'course') !== false)) {
+                    if (!isset($colMap['subject'])) $colMap['subject'] = $cIdx;
+                } elseif (strpos($norm, 'faculty') !== false || strpos($norm, 'teacher') !== false || strpos($norm, 'instructor') !== false) {
+                    if (!isset($colMap['faculty'])) $colMap['faculty'] = $cIdx;
+                } elseif (strpos($norm, 'section') !== false || $norm === 'sec' || $norm === 'class') {
+                    $colMap['section'] = $cIdx;
+                } elseif (strpos($norm, 'type') === false && (strpos($norm, 'room') !== false || strpos($norm, 'classroom') !== false || strpos($norm, 'hall') !== false || strpos($norm, 'lab') !== false)) {
+                    if (!isset($colMap['classroom'])) $colMap['classroom'] = $cIdx;
+                } elseif (strpos($norm, 'status') !== false) {
+                    $colMap['status'] = $cIdx;
+                }
             }
 
             $extracted = [];
